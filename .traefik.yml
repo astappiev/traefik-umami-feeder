@@ -11,6 +11,7 @@ testData:
   umamiToken: ""
   umamiUsername: ""
   umamiPassword: ""
+  umamiTeamId: ""
   websites:
     domain: websiteId
   createNewWebsites: false

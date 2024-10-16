@@ -17,6 +17,7 @@ type Config struct {
 	// as an alternative to UmamiToken, you can set UmamiUsername and UmamiPassword to authenticate
 	UmamiUsername string `json:"umamiUsername"`
 	UmamiPassword string `json:"umamiPassword"`
+	UmamiTeamId   string `json:"umamiTeamId"`
 	// if both UmamiToken and Websites are set, Websites will be used to override the websites in the API
 	Websites map[string]string `json:"websites"`
 	// if createNewWebsites is set to true, the plugin will create new websites in the API, UmamiToken is required
@@ -31,6 +32,7 @@ func CreateConfig() *Config {
 		UmamiToken:        "",
 		UmamiUsername:     "",
 		UmamiPassword:     "",
+		UmamiTeamId:       "",
 		Websites:          map[string]string{},
 		CreateNewWebsites: false,
 		Debug:             false,
@@ -46,6 +48,7 @@ type UmamiFeeder struct {
 
 	UmamiHost         string
 	UmamiToken        string
+	UmamiTeamId       string
 	Websites          map[string]string
 	CreateNewWebsites bool
 }
@@ -61,6 +64,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 		UmamiHost:         config.UmamiHost,
 		UmamiToken:        config.UmamiToken,
+		UmamiTeamId:       config.UmamiTeamId,
 		Websites:          config.Websites,
 		CreateNewWebsites: config.CreateNewWebsites,
 	}
@@ -88,7 +92,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	if h.UmamiToken != "" {
-		websites, err := fetchWebsites(h.UmamiHost, h.UmamiToken)
+		websites, err := fetchWebsites(h.UmamiHost, h.UmamiToken, h.UmamiTeamId)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch websites: %w", err)
 		}
@@ -134,7 +138,7 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 	hostname := parseDomainFromHost(req.Host)
 	websiteId, ok := h.Websites[hostname]
 	if !ok {
-		website, err := createWebsite(h.UmamiHost, h.UmamiToken, hostname)
+		website, err := createWebsite(h.UmamiHost, h.UmamiToken, h.UmamiTeamId, hostname)
 		if err != nil {
 			h.log("failed to create website: " + err.Error())
 			return

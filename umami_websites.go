@@ -15,12 +15,13 @@ type WebsitesResponse struct {
 
 type Website struct {
 	ID        string    `json:"id,omitempty"`
-	Name      string    `json:"name"`
-	Domain    string    `json:"domain"`
+	Name      string    `json:"name,omitempty"`
+	TeamId    string    `json:"teamId,omitempty"`
+	Domain    string    `json:"domain,omitempty"`
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 }
 
-func createWebsite(umamiHost string, umamiToken string, websiteDomain string) (*Website, error) {
+func createWebsite(umamiHost string, umamiToken string, teamId string, websiteDomain string) (*Website, error) {
 	var headers = make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
@@ -28,6 +29,7 @@ func createWebsite(umamiHost string, umamiToken string, websiteDomain string) (*
 	err := sendRequestAndParse(umamiHost+"/api/websites", Website{
 		Name:   websiteDomain,
 		Domain: websiteDomain,
+		TeamId: teamId,
 	}, headers, &result)
 
 	if err != nil {
@@ -37,12 +39,17 @@ func createWebsite(umamiHost string, umamiToken string, websiteDomain string) (*
 	return &result, nil
 }
 
-func fetchWebsites(umamiHost string, umamiToken string) (*[]Website, error) {
+func fetchWebsites(umamiHost string, umamiToken string, teamId string) (*[]Website, error) {
 	var headers = make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
+	url := umamiHost + "/api/websites?pageSize=200"
+	if len(teamId) != 0 {
+		url = umamiHost + "/api/teams/" + teamId + "/websites?pageSize=200"
+	}
+
 	var result WebsitesResponse
-	err := sendRequestAndParse(umamiHost+"/api/websites?pageSize=200", nil, headers, &result)
+	err := sendRequestAndParse(url, nil, headers, &result)
 
 	if err != nil {
 		return nil, err

@@ -7,4 +7,5 @@ http:
           umamiHost: http://umami:3000
           umamiUsername: "admin"
           umamiPassword: "umami"
+          umamiTeamId: "8e39c6ad-e44a-4d3e-be98-015db2d62d40"
           createNewWebsites: true

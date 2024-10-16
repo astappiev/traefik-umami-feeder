@@ -56,7 +56,8 @@ http:
 ```
 
 You have an option to give a list of domains to track (and their website IDs on Umami). \
-Or, you can give a token and the list will be fetched from Umami. For this, you need either [retrieve the token yourself](https://umami.is/docs/api/authentication), or use
+Or, you can give a token and the list will be fetched from Umami. For this, you need
+either [retrieve the token yourself](https://umami.is/docs/api/authentication), or use
 username/password instead.
 
 After that, you need to add the middleware to a [router](https://doc.traefik.io/traefik/routing/routers/#middlewares_1).
@@ -64,11 +65,13 @@ Remember to reference the
 correct [provider namespace](https://doc.traefik.io/traefik/providers/overview/#provider-namespace).
 
 E.g. as Docker labels:
+
 ```yaml
 - "traefik.http.routers.whoami.middlewares=my-umami-middleware@file"
 ```
 
 Or, for all routers in a static configuration:
+
 ```yaml
 entryPoints:
   web:
@@ -85,6 +88,7 @@ entryPoints:
 | `umamiToken`        | -       | `string` | An API Token, used to automatize work with websites, not needed if you provide `websites`                   |
 | `umamiUsername`     | -       | `string` | An alternative to `umamiToken`, you can provide an username and password                                    |
 | `umamiPassword`     | -       | `string` | Only in combination with `umamiUsername`                                                                    |
+| `umamiTeamId`       | -       | `string` | In order to organize websites, you can use Umami Teams                                                      |
 | `websites`          | -       | `map`    | A map of hostnames and their associated Umami IDs. Can also be used to override or extend fetched websites  |
 | `createNewWebsites` | false   | `bool`   | If set to `true`, will try to create a new website on Umami, if domain not found there                      |
 | `debug`             | false   | `bool`   | Something doesn't work? Set to `true` to see more logs (plugins doesn't have access to Traefik's log level) |
