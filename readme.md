@@ -1,4 +1,4 @@
-# Umami Feeder for Traefik
+# Traefik Umami Feeder
 
 This plugin for enables [Traefik Reverse Proxy](https://traefik.io/traefik/) to feed [Umami Analytics](https://umami.is)
 with tracking events.
