@@ -11,6 +11,7 @@ import (
 
 // Config the plugin configuration.
 type Config struct {
+	Disabled  bool   `json:"disabled"`
 	UmamiHost string `json:"umamiHost"`
 	// it is optional, but either UmamiToken or Websites should be set
 	UmamiToken string `json:"umamiToken"`
@@ -28,6 +29,7 @@ type Config struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
+		Disabled:          false,
 		UmamiHost:         "",
 		UmamiToken:        "",
 		UmamiUsername:     "",
@@ -44,6 +46,7 @@ type UmamiFeeder struct {
 	next       http.Handler
 	name       string
 	debug      bool
+	disabled   bool
 	logHandler *log.Logger
 
 	UmamiHost         string
@@ -60,6 +63,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		next:       next,
 		name:       name,
 		debug:      config.Debug,
+		disabled:   config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
 		UmamiHost:         config.UmamiHost,
@@ -69,53 +73,57 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		CreateNewWebsites: config.CreateNewWebsites,
 	}
 
-	if config.UmamiUsername != "" && config.UmamiPassword != "" {
-		token, err := getToken(h.UmamiHost, config.UmamiUsername, config.UmamiPassword)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get token: %w", err)
-		}
-		if token == "" {
-			return nil, fmt.Errorf("retrieved token is empty")
-		}
-		h.trace("token received %s", token)
-		h.UmamiToken = token
-	}
-
-	if h.UmamiHost == "" {
-		return nil, fmt.Errorf("`umamiHost` is not set")
-	}
-	if h.UmamiToken == "" && len(h.Websites) == 0 {
-		return nil, fmt.Errorf("either `umamiToken` or `websites` should be set")
-	}
-	if h.UmamiToken == "" && h.CreateNewWebsites {
-		return nil, fmt.Errorf("`umamiToken` is required to create new websites")
-	}
-
-	if h.UmamiToken != "" {
-		websites, err := fetchWebsites(h.UmamiHost, h.UmamiToken, h.UmamiTeamId)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch websites: %w", err)
+	if !h.disabled {
+		if config.UmamiUsername != "" && config.UmamiPassword != "" {
+			token, err := getToken(h.UmamiHost, config.UmamiUsername, config.UmamiPassword)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get token: %w", err)
+			}
+			if token == "" {
+				return nil, fmt.Errorf("retrieved token is empty")
+			}
+			h.trace("token received %s", token)
+			h.UmamiToken = token
 		}
 
-		for _, website := range *websites {
-			if _, ok := h.Websites[website.Domain]; ok {
-				continue
+		if h.UmamiHost == "" {
+			return nil, fmt.Errorf("`umamiHost` is not set")
+		}
+		if h.UmamiToken == "" && len(h.Websites) == 0 {
+			return nil, fmt.Errorf("either `umamiToken` or `websites` should be set")
+		}
+		if h.UmamiToken == "" && h.CreateNewWebsites {
+			return nil, fmt.Errorf("`umamiToken` is required to create new websites")
+		}
+
+		if h.UmamiToken != "" {
+			websites, err := fetchWebsites(h.UmamiHost, h.UmamiToken, h.UmamiTeamId)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch websites: %w", err)
 			}
 
-			h.Websites[website.Domain] = website.ID
-			h.trace("fetched websiteId for: %s", website.Domain)
+			for _, website := range *websites {
+				if _, ok := h.Websites[website.Domain]; ok {
+					continue
+				}
+
+				h.Websites[website.Domain] = website.ID
+				h.trace("fetched websiteId for: %s", website.Domain)
+			}
+			h.log("websites fetched")
 		}
-		h.log("websites fetched")
 	}
 
 	return h, nil
 }
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if h.shouldBeTracked(req) {
-		go h.trackRequest(req)
-	} else {
-		h.trace("Tracking skipped %v", req.URL)
+	if !h.disabled {
+		if h.shouldBeTracked(req) {
+			go h.trackRequest(req)
+		} else {
+			h.trace("Tracking skipped %v", req.URL)
+		}
 	}
 
 	h.next.ServeHTTP(rw, req)
