@@ -6,33 +6,45 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 )
 
 // Config the plugin configuration.
 type Config struct {
-	// basic plugin configuration
+	// Disabled disables the plugin.
 	Disabled bool `json:"disabled"`
-	Debug    bool `json:"debug"`
+	// Debug enables debug logging, be prepared for flooding.
+	Debug bool `json:"debug"`
 
-	// Umami configuration
+	// UmamiHost is the URL of the Umami instance.
 	UmamiHost string `json:"umamiHost"`
-	// it is optional, but either UmamiToken or Websites should be set
+	// UmamiToken is an API KEY, which is optional, but either UmamiToken or Websites should be set.
 	UmamiToken string `json:"umamiToken"`
-	// as an alternative to UmamiToken, you can set UmamiUsername and UmamiPassword to authenticate
+	// UmamiUsername could be provided as an alternative to UmamiToken, used to retrieve the token.
 	UmamiUsername string `json:"umamiUsername"`
+	// UmamiPassword is required if UmamiUsername is set.
 	UmamiPassword string `json:"umamiPassword"`
-	UmamiTeamId   string `json:"umamiTeamId"`
+	// UmamiTeamId defines a team, which will be used to retrieve the websites.
+	UmamiTeamId string `json:"umamiTeamId"`
 
-	// if both UmamiToken and Websites are set, Websites will be used to override the websites in the API
+	// Websites is a map of domain to websiteId, which is required if UmamiToken is not set.
+	// If both UmamiToken and Websites are set, Websites will override/extend domains retrieved from the API.
 	Websites map[string]string `json:"websites"`
-	// if createNewWebsites is set to true, the plugin will create new websites in the API, UmamiToken is required
+	// CreateNewWebsites when set to true, the plugin will create new websites using API, UmamiToken is required.
 	CreateNewWebsites bool `json:"createNewWebsites"`
 
-	// filters to ignore requests and do not send view events
+	// TrackAllResources defines whether all requests for any resource should be tracked.
+	// By default, only requests that are believed to contain content are tracked.
+	TrackAllResources bool `json:"trackAllResources"`
+	// TrackExtensions defines an alternative list of file extensions that should be tracked.
+	TrackExtensions []string `json:"trackExtensions"`
+
+	// IgnoreUserAgents is a list of user agents that should be ignored.
 	IgnoreUserAgents []string `json:"ignoreUserAgents"`
-	IgnoreIPs        []string `json:"ignoreIPs"`
+	// IgnoreIPs is a list of IPs that should be ignored.
+	IgnoreIPs []string `json:"ignoreIPs"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -49,6 +61,9 @@ func CreateConfig() *Config {
 
 		Websites:          map[string]string{},
 		CreateNewWebsites: false,
+
+		TrackAllResources: false,
+		TrackExtensions:   []string{},
 
 		IgnoreUserAgents: []string{},
 		IgnoreIPs:        []string{},
@@ -69,6 +84,9 @@ type UmamiFeeder struct {
 	websites          map[string]string
 	createNewWebsites bool
 
+	trackAllResources bool
+	trackExtensions   []string
+
 	ignoreUserAgents []string
 	ignoreIPs        []string
 }
@@ -88,6 +106,9 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		umamiTeamId:       config.UmamiTeamId,
 		websites:          config.Websites,
 		createNewWebsites: config.CreateNewWebsites,
+
+		trackAllResources: config.TrackAllResources,
+		trackExtensions:   config.TrackExtensions,
 
 		ignoreUserAgents: config.IgnoreUserAgents,
 		ignoreIPs:        config.IgnoreIPs,
@@ -149,17 +170,17 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if !h.isDisabled {
-		if h.shouldBeTracked(req) {
+		if h.shouldTrack(req) {
 			go h.trackRequest(req)
 		} else {
-			h.debug("Tracking skipped %s", req.URL)
+			h.debug("ignoring request to %s%s", req.Host, req.URL)
 		}
 	}
 
 	h.next.ServeHTTP(rw, req)
 }
 
-func (h *UmamiFeeder) shouldBeTracked(req *http.Request) bool {
+func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 	if len(h.ignoreUserAgents) > 0 {
 		userAgent := req.UserAgent()
 		for _, disabledUserAgent := range h.ignoreUserAgents {
@@ -178,12 +199,53 @@ func (h *UmamiFeeder) shouldBeTracked(req *http.Request) bool {
 		}
 	}
 
+	if !h.shouldTrackResource(req.URL.Path) {
+		return false
+	}
+
 	if h.createNewWebsites {
 		return true
 	}
 
 	hostname := parseDomainFromHost(req.Host)
 	if _, ok := h.websites[hostname]; ok {
+		return true
+	}
+
+	return false
+}
+
+func (h *UmamiFeeder) shouldTrackResource(url string) bool {
+	if h.trackAllResources {
+		return true
+	}
+
+	pathExt := path.Ext(url)
+
+	// If a custom file extension list is defined, check if the resource matches it. If not, do not report.
+	if len(h.trackExtensions) > 0 {
+		for _, suffix := range h.trackExtensions {
+			if suffix == pathExt {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Check if the suffix is regarded to be "content".
+	switch pathExt {
+	case ".htm":
+	case ".html":
+	case ".xhtml":
+	case ".jsf":
+	case ".md":
+	case ".php":
+	case ".rss":
+	case ".rtf":
+	case ".txt":
+	case ".xml":
+	case ".pdf":
+	case "":
 		return true
 	}
 

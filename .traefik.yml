@@ -7,8 +7,6 @@ summary: A Traefik plugin that feeds Umami Analytics with pageview events
 iconPath: .assets/icon.png
 
 testData:
-  disabled: false
-  debug: false
   umamiHost: ""
   umamiToken: ""
   umamiUsername: ""
@@ -17,5 +15,3 @@ testData:
   websites:
     domain: websiteId
   createNewWebsites: false
-  ignoreUserAgents: []
-  ignoreIPs: []
