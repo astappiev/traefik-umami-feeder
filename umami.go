@@ -59,8 +59,8 @@ func CreateConfig() *Config {
 type UmamiFeeder struct {
 	next       http.Handler
 	name       string
-	debug      bool
-	disabled   bool
+	isDebug    bool
+	isDisabled bool
 	logHandler *log.Logger
 
 	umamiHost         string
@@ -79,8 +79,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	h := &UmamiFeeder{
 		next:       next,
 		name:       name,
-		debug:      config.Debug,
-		disabled:   config.Disabled,
+		isDebug:    config.Debug,
+		isDisabled: config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
 		umamiHost:         config.UmamiHost,
@@ -93,12 +93,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		ignoreIPs:        config.IgnoreIPs,
 	}
 
-	if !h.disabled {
+	if !h.isDisabled {
 		err := h.verifyConfig(config)
 		if err != nil {
 			h.error(err.Error())
 			h.error("due to the error, the Umami plugin is disabled")
-			h.disabled = true
+			h.isDisabled = true
 		}
 	}
 
@@ -118,7 +118,7 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 		if token == "" {
 			return fmt.Errorf("retrieved token is empty")
 		}
-		h.trace("token received %s", token)
+		h.debug("token received %s", token)
 		h.umamiToken = token
 	}
 	if h.umamiToken == "" && len(h.websites) == 0 {
@@ -140,7 +140,7 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 			}
 
 			h.websites[website.Domain] = website.ID
-			h.trace("fetched websiteId for: %s", website.Domain)
+			h.debug("fetched websiteId for: %s", website.Domain)
 		}
 	}
 
@@ -148,11 +148,11 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 }
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if !h.disabled {
+	if !h.isDisabled {
 		if h.shouldBeTracked(req) {
 			go h.trackRequest(req)
 		} else {
-			h.trace("Tracking skipped %s", req.URL)
+			h.debug("Tracking skipped %s", req.URL)
 		}
 	}
 
@@ -202,11 +202,11 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 
 		h.websites[website.Domain] = website.ID
 		websiteId = website.ID
-		h.trace("created website for: %s", website.Domain)
+		h.debug("created website for: %s", website.Domain)
 	}
 
 	sendBody, sendHeaders := buildSendBody(req, websiteId)
-	h.trace("sending tracking request %s with body %v %v", req.URL, sendBody, sendHeaders)
+	h.debug("sending tracking request %s with body %v %v", req.URL, sendBody, sendHeaders)
 
 	_, err := sendRequest(h.umamiHost+"/api/send", sendBody, sendHeaders)
 	if err != nil {
@@ -223,9 +223,9 @@ func (h *UmamiFeeder) error(message string) {
 }
 
 // Arguments are handled in the manner of [fmt.Printf].
-func (h *UmamiFeeder) trace(format string, v ...any) {
-	if h.logHandler != nil && h.debug {
+func (h *UmamiFeeder) debug(format string, v ...any) {
+	if h.logHandler != nil && h.isDebug {
 		time := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("%s TRC middlewareName=%s msg=\"%s\"", time, h.name, fmt.Sprintf(format, v...))
+		h.logHandler.Printf("%s DBG middlewareName=%s msg=\"%s\"", time, h.name, fmt.Sprintf(format, v...))
 	}
 }
