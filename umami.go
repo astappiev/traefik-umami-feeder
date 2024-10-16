@@ -6,12 +6,17 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 // Config the plugin configuration.
 type Config struct {
-	Disabled  bool   `json:"disabled"`
+	// basic plugin configuration
+	Disabled bool `json:"disabled"`
+	Debug    bool `json:"debug"`
+
+	// Umami configuration
 	UmamiHost string `json:"umamiHost"`
 	// it is optional, but either UmamiToken or Websites should be set
 	UmamiToken string `json:"umamiToken"`
@@ -19,25 +24,34 @@ type Config struct {
 	UmamiUsername string `json:"umamiUsername"`
 	UmamiPassword string `json:"umamiPassword"`
 	UmamiTeamId   string `json:"umamiTeamId"`
+
 	// if both UmamiToken and Websites are set, Websites will be used to override the websites in the API
 	Websites map[string]string `json:"websites"`
 	// if createNewWebsites is set to true, the plugin will create new websites in the API, UmamiToken is required
 	CreateNewWebsites bool `json:"createNewWebsites"`
-	Debug             bool `json:"debug"`
+
+	// filters to ignore requests and do not send view events
+	IgnoreUserAgents []string `json:"ignoreUserAgents"`
+	IgnoreIPs        []string `json:"ignoreIPs"`
 }
 
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Disabled:          false,
-		UmamiHost:         "",
-		UmamiToken:        "",
-		UmamiUsername:     "",
-		UmamiPassword:     "",
-		UmamiTeamId:       "",
+		Disabled: false,
+		Debug:    false,
+
+		UmamiHost:     "",
+		UmamiToken:    "",
+		UmamiUsername: "",
+		UmamiPassword: "",
+		UmamiTeamId:   "",
+
 		Websites:          map[string]string{},
 		CreateNewWebsites: false,
-		Debug:             false,
+
+		IgnoreUserAgents: []string{},
+		IgnoreIPs:        []string{},
 	}
 }
 
@@ -49,11 +63,14 @@ type UmamiFeeder struct {
 	disabled   bool
 	logHandler *log.Logger
 
-	UmamiHost         string
-	UmamiToken        string
-	UmamiTeamId       string
-	Websites          map[string]string
-	CreateNewWebsites bool
+	umamiHost         string
+	umamiToken        string
+	umamiTeamId       string
+	websites          map[string]string
+	createNewWebsites bool
+
+	ignoreUserAgents []string
+	ignoreIPs        []string
 }
 
 // New created a new Demo plugin.
@@ -66,16 +83,19 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		disabled:   config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
-		UmamiHost:         config.UmamiHost,
-		UmamiToken:        config.UmamiToken,
-		UmamiTeamId:       config.UmamiTeamId,
-		Websites:          config.Websites,
-		CreateNewWebsites: config.CreateNewWebsites,
+		umamiHost:         config.UmamiHost,
+		umamiToken:        config.UmamiToken,
+		umamiTeamId:       config.UmamiTeamId,
+		websites:          config.Websites,
+		createNewWebsites: config.CreateNewWebsites,
+
+		ignoreUserAgents: config.IgnoreUserAgents,
+		ignoreIPs:        config.IgnoreIPs,
 	}
 
 	if !h.disabled {
 		if config.UmamiUsername != "" && config.UmamiPassword != "" {
-			token, err := getToken(h.UmamiHost, config.UmamiUsername, config.UmamiPassword)
+			token, err := getToken(h.umamiHost, config.UmamiUsername, config.UmamiPassword)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get token: %w", err)
 			}
@@ -83,31 +103,31 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 				return nil, fmt.Errorf("retrieved token is empty")
 			}
 			h.trace("token received %s", token)
-			h.UmamiToken = token
+			h.umamiToken = token
 		}
 
-		if h.UmamiHost == "" {
+		if h.umamiHost == "" {
 			return nil, fmt.Errorf("`umamiHost` is not set")
 		}
-		if h.UmamiToken == "" && len(h.Websites) == 0 {
+		if h.umamiToken == "" && len(h.websites) == 0 {
 			return nil, fmt.Errorf("either `umamiToken` or `websites` should be set")
 		}
-		if h.UmamiToken == "" && h.CreateNewWebsites {
+		if h.umamiToken == "" && h.createNewWebsites {
 			return nil, fmt.Errorf("`umamiToken` is required to create new websites")
 		}
 
-		if h.UmamiToken != "" {
-			websites, err := fetchWebsites(h.UmamiHost, h.UmamiToken, h.UmamiTeamId)
+		if h.umamiToken != "" {
+			websites, err := fetchWebsites(h.umamiHost, h.umamiToken, h.umamiTeamId)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fetch websites: %w", err)
 			}
 
 			for _, website := range *websites {
-				if _, ok := h.Websites[website.Domain]; ok {
+				if _, ok := h.websites[website.Domain]; ok {
 					continue
 				}
 
-				h.Websites[website.Domain] = website.ID
+				h.websites[website.Domain] = website.ID
 				h.trace("fetched websiteId for: %s", website.Domain)
 			}
 			h.log("websites fetched")
@@ -130,12 +150,30 @@ func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 }
 
 func (h *UmamiFeeder) shouldBeTracked(req *http.Request) bool {
-	if h.CreateNewWebsites {
+	if len(h.ignoreUserAgents) > 0 {
+		userAgent := req.UserAgent()
+		for _, disabledUserAgent := range h.ignoreUserAgents {
+			if strings.Contains(userAgent, disabledUserAgent) {
+				return false
+			}
+		}
+	}
+
+	if len(h.ignoreIPs) > 0 {
+		requestIp := req.RemoteAddr
+		for _, disabledIp := range h.ignoreIPs {
+			if requestIp == disabledIp {
+				return false
+			}
+		}
+	}
+
+	if h.createNewWebsites {
 		return true
 	}
 
 	hostname := parseDomainFromHost(req.Host)
-	if _, ok := h.Websites[hostname]; ok {
+	if _, ok := h.websites[hostname]; ok {
 		return true
 	}
 
@@ -144,15 +182,15 @@ func (h *UmamiFeeder) shouldBeTracked(req *http.Request) bool {
 
 func (h *UmamiFeeder) trackRequest(req *http.Request) {
 	hostname := parseDomainFromHost(req.Host)
-	websiteId, ok := h.Websites[hostname]
+	websiteId, ok := h.websites[hostname]
 	if !ok {
-		website, err := createWebsite(h.UmamiHost, h.UmamiToken, h.UmamiTeamId, hostname)
+		website, err := createWebsite(h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
 		if err != nil {
 			h.log("failed to create website: " + err.Error())
 			return
 		}
 
-		h.Websites[website.Domain] = website.ID
+		h.websites[website.Domain] = website.ID
 		websiteId = website.ID
 		h.trace("created website for: %s", website.Domain)
 	}
@@ -160,7 +198,7 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 	sendBody, sendHeaders := buildSendBody(req, websiteId)
 	h.trace("sending tracking request %s with body %v %v", req.URL, sendBody, sendHeaders)
 
-	_, err := sendRequest(h.UmamiHost+"/api/send", sendBody, sendHeaders)
+	_, err := sendRequest(h.umamiHost+"/api/send", sendBody, sendHeaders)
 	if err != nil {
 		h.trace("failed to send tracking: " + err.Error())
 		return

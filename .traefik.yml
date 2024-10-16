@@ -8,6 +8,7 @@ summary: 'Traefik plugin that sends HTTP requests to Umami as pageview events.'
 
 testData:
   disabled: false
+  debug: false
   umamiHost: ""
   umamiToken: ""
   umamiUsername: ""
@@ -16,4 +17,5 @@ testData:
   websites:
     domain: websiteId
   createNewWebsites: false
-  debug: false
+  ignoreUserAgents: []
+  ignoreIPs: []
