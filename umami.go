@@ -94,47 +94,57 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	if !h.disabled {
-		if config.UmamiUsername != "" && config.UmamiPassword != "" {
-			token, err := getToken(h.umamiHost, config.UmamiUsername, config.UmamiPassword)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get token: %w", err)
-			}
-			if token == "" {
-				return nil, fmt.Errorf("retrieved token is empty")
-			}
-			h.trace("token received %s", token)
-			h.umamiToken = token
-		}
-
-		if h.umamiHost == "" {
-			return nil, fmt.Errorf("`umamiHost` is not set")
-		}
-		if h.umamiToken == "" && len(h.websites) == 0 {
-			return nil, fmt.Errorf("either `umamiToken` or `websites` should be set")
-		}
-		if h.umamiToken == "" && h.createNewWebsites {
-			return nil, fmt.Errorf("`umamiToken` is required to create new websites")
-		}
-
-		if h.umamiToken != "" {
-			websites, err := fetchWebsites(h.umamiHost, h.umamiToken, h.umamiTeamId)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch websites: %w", err)
-			}
-
-			for _, website := range *websites {
-				if _, ok := h.websites[website.Domain]; ok {
-					continue
-				}
-
-				h.websites[website.Domain] = website.ID
-				h.trace("fetched websiteId for: %s", website.Domain)
-			}
-			h.log("websites fetched")
+		err := h.verifyConfig(config)
+		if err != nil {
+			h.error(err.Error())
+			h.error("due to the error, the Umami plugin is disabled")
+			h.disabled = true
 		}
 	}
 
 	return h, nil
+}
+
+func (h *UmamiFeeder) verifyConfig(config *Config) error {
+	if h.umamiHost == "" {
+		return fmt.Errorf("`umamiHost` is not set")
+	}
+
+	if config.UmamiUsername != "" && config.UmamiPassword != "" {
+		token, err := getToken(h.umamiHost, config.UmamiUsername, config.UmamiPassword)
+		if err != nil {
+			return fmt.Errorf("failed to get token: %w", err)
+		}
+		if token == "" {
+			return fmt.Errorf("retrieved token is empty")
+		}
+		h.trace("token received %s", token)
+		h.umamiToken = token
+	}
+	if h.umamiToken == "" && len(h.websites) == 0 {
+		return fmt.Errorf("either `umamiToken` or `websites` should be set")
+	}
+	if h.umamiToken == "" && h.createNewWebsites {
+		return fmt.Errorf("`umamiToken` is required to create new websites")
+	}
+
+	if h.umamiToken != "" {
+		websites, err := fetchWebsites(h.umamiHost, h.umamiToken, h.umamiTeamId)
+		if err != nil {
+			return fmt.Errorf("failed to fetch websites: %w", err)
+		}
+
+		for _, website := range *websites {
+			if _, ok := h.websites[website.Domain]; ok {
+				continue
+			}
+
+			h.websites[website.Domain] = website.ID
+			h.trace("fetched websiteId for: %s", website.Domain)
+		}
+	}
+
+	return nil
 }
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -142,7 +152,7 @@ func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		if h.shouldBeTracked(req) {
 			go h.trackRequest(req)
 		} else {
-			h.trace("Tracking skipped %v", req.URL)
+			h.trace("Tracking skipped %s", req.URL)
 		}
 	}
 
@@ -186,7 +196,7 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 	if !ok {
 		website, err := createWebsite(h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
 		if err != nil {
-			h.log("failed to create website: " + err.Error())
+			h.error("failed to create website: " + err.Error())
 			return
 		}
 
@@ -200,15 +210,15 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 
 	_, err := sendRequest(h.umamiHost+"/api/send", sendBody, sendHeaders)
 	if err != nil {
-		h.trace("failed to send tracking: " + err.Error())
+		h.error("failed to send tracking: " + err.Error())
 		return
 	}
 }
 
-func (h *UmamiFeeder) log(message string) {
+func (h *UmamiFeeder) error(message string) {
 	if h.logHandler != nil {
 		time := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("time=\"%s\" level=info msg=\"[traefik-umami-feeder] %s\"", time, message)
+		h.logHandler.Printf("%s ERR middlewareName=%s error=\"%s\"", time, h.name, message)
 	}
 }
 
@@ -216,6 +226,6 @@ func (h *UmamiFeeder) log(message string) {
 func (h *UmamiFeeder) trace(format string, v ...any) {
 	if h.logHandler != nil && h.debug {
 		time := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("time=\"%s\" level=trace msg=\"[traefik-umami-feeder] %s\"", time, fmt.Sprintf(format, v...))
+		h.logHandler.Printf("%s TRC middlewareName=%s msg=\"%s\"", time, h.name, fmt.Sprintf(format, v...))
 	}
 }
