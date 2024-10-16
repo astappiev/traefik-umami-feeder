@@ -1,0 +1,30 @@
+log:
+  level: INFO
+
+# accessLog: {}
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: traefik
+    watch: true
+  file:
+    directory: /config
+    watch: true
+
+entryPoints:
+  "traefik": # traefik dashboard
+    address: ":8080"
+  "whoami": # http
+    address: ":8081"
+  "umami": # umami dashboard
+    address: ":3000"
+
+api:
+  dashboard: true
+
+experimental:
+  localPlugins:
+    umami-feeder:
+      moduleName: "github.com/astappiev/traefik-umami-feeder"

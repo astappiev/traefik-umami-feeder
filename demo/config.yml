@@ -1,0 +1,10 @@
+http:
+  middlewares:
+    umami:
+      plugin:
+        umami-feeder:
+          debug: true
+          umamiHost: http://umami:3000
+          umamiUsername: "admin"
+          umamiPassword: "umami"
+          createNewWebsites: true

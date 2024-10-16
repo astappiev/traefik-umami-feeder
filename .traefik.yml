@@ -1,0 +1,17 @@
+displayName: Umami Feeder
+type: middleware
+iconPath: .assets/icon.png
+
+import: github.com/astappiev/traefik-umami-feeder
+
+summary: 'Traefik plugin that sends HTTP requests to Umami as pageview events.'
+
+testData:
+  umamiHost: ""
+  umamiToken: ""
+  umamiUsername: ""
+  umamiPassword: ""
+  websites:
+    domain: websiteId
+  createNewWebsites: false
+  debug: false
