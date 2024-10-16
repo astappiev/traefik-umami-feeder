@@ -12,11 +12,11 @@ import (
 type SendPayload struct {
 	Website  string                 `json:"website"`
 	Hostname string                 `json:"hostname"`
-	Language string                 `json:"language"`
+	Language string                 `json:"language,omitempty"`
 	Url      string                 `json:"url"`
-	Referer  string                 `json:"referer"`
-	Name     string                 `json:"name"`
-	Data     map[string]interface{} `json:"data"`
+	Referrer string                 `json:"referrer,omitempty"`
+	Name     string                 `json:"name,omitempty"`
+	Data     map[string]interface{} `json:"data,omitempty"`
 }
 
 type SendBody struct {
@@ -30,8 +30,7 @@ func buildPayload(req *http.Request, websiteId string) SendPayload {
 		Hostname: parseDomainFromHost(req.Host),
 		Language: parseAcceptLanguage(req.Header.Get("Accept-Language")),
 		Url:      req.URL.String(),
-		Referer:  req.Referer(),
-		Name:     "traefik",
+		Referrer: req.Referer(),
 		Data:     map[string]interface{}{},
 	}
 }
