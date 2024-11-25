@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -45,6 +46,8 @@ type Config struct {
 	IgnoreUserAgents []string `json:"ignoreUserAgents"`
 	// IgnoreIPs is a list of IPs that should be ignored.
 	IgnoreIPs []string `json:"ignoreIPs"`
+	// headerIp Header associated to real IP
+	HeaderIp string `json:"headerIp"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -67,6 +70,7 @@ func CreateConfig() *Config {
 
 		IgnoreUserAgents: []string{},
 		IgnoreIPs:        []string{},
+		HeaderIp:         "X-Real-Ip",
 	}
 }
 
@@ -89,6 +93,7 @@ type UmamiFeeder struct {
 
 	ignoreUserAgents []string
 	ignoreIPs        []string
+	headerIp         string
 }
 
 // New created a new Demo plugin.
@@ -112,6 +117,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 		ignoreUserAgents: config.IgnoreUserAgents,
 		ignoreIPs:        config.IgnoreIPs,
+		headerIp:         config.HeaderIp,
 	}
 
 	if !h.isDisabled {
@@ -191,9 +197,25 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 	}
 
 	if len(h.ignoreIPs) > 0 {
-		requestIp := req.RemoteAddr
+		requestIp := req.Header.Get(h.headerIp)
+		if requestIp == "" {
+			requestIp = req.RemoteAddr
+		}
+		ip := net.ParseIP(requestIp)
+		if ip == nil {
+			h.debug("invalid IP %s", requestIp)
+			return false
+		}
 		for _, disabledIp := range h.ignoreIPs {
-			if requestIp == disabledIp {
+			dIp := net.ParseIP(disabledIp)
+			if dIp == nil {
+				_, ipNet, err := net.ParseCIDR(disabledIp)
+				if err != nil {
+					h.debug("invalid ignoreIp %s", disabledIp)
+				} else if ipNet.Contains(ip) {
+					return false
+				}
+			} else if dIp.Equal(ip) {
 				return false
 			}
 		}
