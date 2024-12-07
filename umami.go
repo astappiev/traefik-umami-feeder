@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"strings"
@@ -44,7 +44,7 @@ type Config struct {
 
 	// IgnoreUserAgents is a list of user agents that should be ignored.
 	IgnoreUserAgents []string `json:"ignoreUserAgents"`
-	// IgnoreIPs is a list of IPs that should be ignored.
+	// IgnoreIPs is a list of IPs or CIDRs that should be ignored.
 	IgnoreIPs []string `json:"ignoreIPs"`
 	// headerIp Header associated to real IP
 	HeaderIp string `json:"headerIp"`
@@ -92,7 +92,7 @@ type UmamiFeeder struct {
 	trackExtensions   []string
 
 	ignoreUserAgents []string
-	ignoreIPs        []string
+	ignorePrefixes   []netip.Prefix
 	headerIp         string
 }
 
@@ -116,7 +116,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		trackExtensions:   config.TrackExtensions,
 
 		ignoreUserAgents: config.IgnoreUserAgents,
-		ignoreIPs:        config.IgnoreIPs,
+		ignorePrefixes:   []netip.Prefix{},
 		headerIp:         config.HeaderIp,
 	}
 
@@ -126,6 +126,25 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			h.error(err.Error())
 			h.error("due to the error, the Umami plugin is disabled")
 			h.isDisabled = true
+		}
+	}
+
+	if len(config.IgnoreIPs) > 0 {
+		for _, ignoreIp := range config.IgnoreIPs {
+			network, err := netip.ParsePrefix(ignoreIp)
+			if err != nil {
+				network, err = netip.ParsePrefix(ignoreIp + "/32")
+			}
+
+			if err != nil || !network.IsValid() {
+				if err != nil {
+					h.error(err.Error())
+				}
+				h.error(fmt.Sprintf("invalid ignoreIp given %s, this param accepts only IP addresses or CIRD in a format 10.0.0.1/16", ignoreIp))
+				h.isDisabled = true
+			} else {
+				h.ignorePrefixes = append(h.ignorePrefixes, network)
+			}
 		}
 	}
 
@@ -196,26 +215,20 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 		}
 	}
 
-	if len(h.ignoreIPs) > 0 {
+	if len(h.ignorePrefixes) > 0 {
 		requestIp := req.Header.Get(h.headerIp)
 		if requestIp == "" {
 			requestIp = req.RemoteAddr
 		}
-		ip := net.ParseIP(requestIp)
-		if ip == nil {
+
+		ip, err := netip.ParseAddr(requestIp)
+		if err != nil {
 			h.debug("invalid IP %s", requestIp)
 			return false
 		}
-		for _, disabledIp := range h.ignoreIPs {
-			dIp := net.ParseIP(disabledIp)
-			if dIp == nil {
-				_, ipNet, err := net.ParseCIDR(disabledIp)
-				if err != nil {
-					h.debug("invalid ignoreIp %s", disabledIp)
-				} else if ipNet.Contains(ip) {
-					return false
-				}
-			} else if dIp.Equal(ip) {
+
+		for _, prefix := range h.ignorePrefixes {
+			if prefix.Contains(ip) {
 				return false
 			}
 		}
