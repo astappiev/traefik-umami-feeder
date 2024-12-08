@@ -117,6 +117,10 @@ func (h *UmamiFeeder) reportEventToUmami(ctx context.Context, event *UmamiPayloa
 		websiteId = website.ID
 		h.debug("created website for: %s", website.Domain)
 	}
+	if websiteId == "" {
+		h.error("skip tracking, websiteId is unknown: " + hostname)
+		return
+	}
 	event.body.Payload.Website = websiteId
 
 	h.debug("sending tracking request %v %v", event.body, event.headers)
