@@ -120,11 +120,11 @@ func (h *UmamiFeeder) reportEventToUmami(ctx context.Context, event *UmamiPayloa
 
 	h.debug("sending tracking request %s with body %v %v", event.body.Payload.Url, event.body, event.headers)
 	resp, err := sendRequest(ctx, h.umamiHost+"/api/send", event.body, event.headers)
-	defer func() {
-		_ = resp.Body.Close()
-	}()
 	if err != nil {
 		h.error("failed to send tracking: " + err.Error())
 		return
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 }

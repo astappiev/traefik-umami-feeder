@@ -47,6 +47,9 @@ func sendRequest(ctx context.Context, url string, body interface{}, headers http
 
 	status := resp.StatusCode
 	if status < 200 || status >= 300 {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		return nil, fmt.Errorf("request failed with status %d", status)
 	}
 
