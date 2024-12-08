@@ -50,7 +50,12 @@ func sendRequest(ctx context.Context, url string, body interface{}, headers http
 		defer func() {
 			_ = resp.Body.Close()
 		}()
-		return nil, fmt.Errorf("request failed with status %d", status)
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("request failed with status %d (failed to read body: %v)", status, err)
+		}
+		return nil, fmt.Errorf("request failed with status %d (%v)", status, string(respBody))
 	}
 
 	return resp, nil

@@ -9,10 +9,10 @@ import (
 type SendPayload struct {
 	Website  string `json:"website"`
 	Hostname string `json:"hostname"`
-	Ip       string `json:"ip"`
 	Language string `json:"language,omitempty"`
 	Referrer string `json:"referrer,omitempty"`
 	Url      string `json:"url"`
+	//Ip       string                 `json:"ip,omitempty"`
 	//Data     map[string]interface{} `json:"data,omitempty"` // Additional data for the event
 	//Name     string                 `json:"name,omitempty"` // Event name (for custom events)
 	//Screen   string                 `json:"screen,omitempty"` // Screen resolution (ex. "1920x1080")
@@ -119,7 +119,7 @@ func (h *UmamiFeeder) reportEventToUmami(ctx context.Context, event *UmamiPayloa
 	}
 	event.body.Payload.Website = websiteId
 
-	h.debug("sending tracking request %s with body %v %v", event.body.Payload.Url, event.body, event.headers)
+	h.debug("sending tracking request %v %v", event.body, event.headers)
 	resp, err := sendRequest(ctx, h.umamiHost+"/api/send", event.body, event.headers)
 	if err != nil {
 		h.error("failed to send tracking: " + err.Error())
