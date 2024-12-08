@@ -59,6 +59,7 @@ func (h *UmamiFeeder) submitToFeed(req *http.Request) {
 
 	var headers = make(http.Header)
 	copyHeaders(headers, req.Header, headersToCopy)
+	writeXForwardedHeaders(headers, req)
 
 	payload := &UmamiPayload{body: body, headers: headers}
 

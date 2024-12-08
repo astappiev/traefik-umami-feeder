@@ -98,11 +98,3 @@ func parseAcceptLanguage(acceptLanguage string) string {
 	}
 	return matches[0][1]
 }
-
-func copyHeaders(dst, src http.Header, headersToCopy []string) {
-	for _, key := range headersToCopy {
-		if values := src.Values(key); len(values) > 0 {
-			dst[key] = values
-		}
-	}
-}
