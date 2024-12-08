@@ -20,7 +20,7 @@ type Config struct {
 	// Debug enables debug logging, be prepared for flooding.
 	Debug bool `json:"debug"`
 	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Umami.
-	QueueSize int
+	QueueSize int `json:"queueSize"`
 
 	// UmamiHost is the URL of the Umami instance.
 	UmamiHost string `json:"umamiHost"`
@@ -39,6 +39,8 @@ type Config struct {
 	// CreateNewWebsites when set to true, the plugin will create new websites using API, UmamiToken is required.
 	CreateNewWebsites bool `json:"createNewWebsites"`
 
+	// TrackErrors defines whether errors (status codes >= 400) should be tracked.
+	TrackErrors bool `json:"trackErrors"`
 	// TrackAllResources defines whether all requests for any resource should be tracked.
 	// By default, only requests that are believed to contain content are tracked.
 	TrackAllResources bool `json:"trackAllResources"`
@@ -58,9 +60,10 @@ type Config struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Disabled:  false,
-		Debug:     false,
-		QueueSize: 1000,
+		Disabled:    false,
+		Debug:       false,
+		QueueSize:   1000,
+		TrackErrors: false,
 
 		UmamiHost:     "",
 		UmamiToken:    "",
@@ -96,6 +99,7 @@ type UmamiFeeder struct {
 	websites          map[string]string
 	createNewWebsites bool
 
+	trackErrors       bool
 	trackAllResources bool
 	trackExtensions   []string
 
@@ -123,6 +127,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		websites:          config.Websites,
 		createNewWebsites: config.CreateNewWebsites,
 
+		trackErrors:       config.TrackErrors,
 		trackAllResources: config.TrackAllResources,
 		trackExtensions:   config.TrackExtensions,
 
@@ -225,7 +230,16 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if !h.isDisabled && h.shouldTrack(req) {
-		h.submitToFeed(req)
+		// If the resource should be reported, we wrap the response writer and check the status code before reporting
+		wrappedResponseWriter := &ResponseWriter{
+			ResponseWriter: rw,
+			request:        req,
+			feeder:         h,
+		}
+
+		// Continue with next handler.
+		h.next.ServeHTTP(wrappedResponseWriter, req)
+		return
 	}
 
 	h.next.ServeHTTP(rw, req)
@@ -314,6 +328,18 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 	}
 
 	return false
+}
+
+func (h *UmamiFeeder) shouldTrackStatus(statusCode int) (report bool) {
+	if statusCode >= 400 {
+		if h.trackErrors {
+			return true
+		}
+
+		h.debug("not reporting %d error", statusCode)
+		return false
+	}
+	return true
 }
 
 func (h *UmamiFeeder) error(message string) {

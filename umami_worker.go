@@ -46,7 +46,7 @@ var headersToCopy = []string{
 // Copied and adapted from https://github.com/safing/plausiblefeeder/blob/master/event.go
 // Licensed as MIT license
 
-func (h *UmamiFeeder) submitToFeed(req *http.Request) {
+func (h *UmamiFeeder) submitToFeed(req *http.Request, code int) {
 	body := SendBody{
 		Payload: SendPayload{
 			Hostname: parseDomainFromHost(req.Host),
