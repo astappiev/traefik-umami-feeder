@@ -94,7 +94,7 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 		// Wait for event.
 		select {
 		case <-ctx.Done():
-			h.error("worker shutting down (canceled)")
+			h.debug("worker shutting down (canceled)")
 			return nil
 
 		case event := <-h.queue:

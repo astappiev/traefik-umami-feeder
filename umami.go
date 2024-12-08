@@ -135,15 +135,13 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	if !h.isDisabled {
 		err := h.connect(ctx, config)
 		if err != nil {
-			h.error(err.Error())
-			h.error("unable to connect to Umami, the plugin is disabled")
+			h.error("unable to connect to Umami, the plugin is disabled: " + err.Error())
 			h.isDisabled = true
 		}
 
 		err = h.verifyConfig(config)
 		if err != nil {
-			h.error(err.Error())
-			h.error("configuration error, the plugin is disabled")
+			h.error("configuration error, the plugin is disabled: " + err.Error())
 			h.isDisabled = true
 		}
 
