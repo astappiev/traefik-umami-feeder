@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -42,9 +43,11 @@ type Config struct {
 	// TrackExtensions defines an alternative list of file extensions that should be tracked.
 	TrackExtensions []string `json:"trackExtensions"`
 
-	// IgnoreUserAgents is a list of user agents that should be ignored.
+	// IgnoreUserAgents is a list of user agents to ignore.
 	IgnoreUserAgents []string `json:"ignoreUserAgents"`
-	// IgnoreIPs is a list of IPs or CIDRs that should be ignored.
+	// IgnoreURLs is a list of request urls to ignore, each string is converted to RegExp and urls matched against it.
+	IgnoreURLs []string `json:"ignoreURLs"`
+	// IgnoreIPs is a list of IPs or CIDRs to ignore.
 	IgnoreIPs []string `json:"ignoreIPs"`
 	// headerIp Header associated to real IP
 	HeaderIp string `json:"headerIp"`
@@ -69,6 +72,7 @@ func CreateConfig() *Config {
 		TrackExtensions:   []string{},
 
 		IgnoreUserAgents: []string{},
+		IgnoreURLs:       []string{},
 		IgnoreIPs:        []string{},
 		HeaderIp:         "X-Real-Ip",
 	}
@@ -92,6 +96,7 @@ type UmamiFeeder struct {
 	trackExtensions   []string
 
 	ignoreUserAgents []string
+	ignoreRegexps    []regexp.Regexp
 	ignorePrefixes   []netip.Prefix
 	headerIp         string
 }
@@ -116,42 +121,31 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		trackExtensions:   config.TrackExtensions,
 
 		ignoreUserAgents: config.IgnoreUserAgents,
+		ignoreRegexps:    []regexp.Regexp{},
 		ignorePrefixes:   []netip.Prefix{},
 		headerIp:         config.HeaderIp,
 	}
 
 	if !h.isDisabled {
-		err := h.verifyConfig(config)
+		err := h.connect(config)
 		if err != nil {
 			h.error(err.Error())
-			h.error("due to the error, the Umami plugin is disabled")
+			h.error("unable to connect to Umami, the plugin is disabled")
 			h.isDisabled = true
 		}
-	}
 
-	if len(config.IgnoreIPs) > 0 {
-		for _, ignoreIp := range config.IgnoreIPs {
-			network, err := netip.ParsePrefix(ignoreIp)
-			if err != nil {
-				network, err = netip.ParsePrefix(ignoreIp + "/32")
-			}
-
-			if err != nil || !network.IsValid() {
-				if err != nil {
-					h.error(err.Error())
-				}
-				h.error(fmt.Sprintf("invalid ignoreIp given %s, this param accepts only IP addresses or CIRD in a format 10.0.0.1/16", ignoreIp))
-				h.isDisabled = true
-			} else {
-				h.ignorePrefixes = append(h.ignorePrefixes, network)
-			}
+		err = h.verifyConfig(config)
+		if err != nil {
+			h.error(err.Error())
+			h.error("configuration error, the plugin is disabled")
+			h.isDisabled = true
 		}
 	}
 
 	return h, nil
 }
 
-func (h *UmamiFeeder) verifyConfig(config *Config) error {
+func (h *UmamiFeeder) connect(config *Config) error {
 	if h.umamiHost == "" {
 		return fmt.Errorf("`umamiHost` is not set")
 	}
@@ -193,28 +187,45 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 	return nil
 }
 
-func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if !h.isDisabled {
-		if h.shouldTrack(req) {
-			go h.trackRequest(req)
-		} else {
-			h.debug("ignoring request to %s%s", req.Host, req.URL)
+func (h *UmamiFeeder) verifyConfig(config *Config) error {
+	if len(config.IgnoreIPs) > 0 {
+		for _, ignoreIp := range config.IgnoreIPs {
+			network, err := netip.ParsePrefix(ignoreIp)
+			if err != nil {
+				network, err = netip.ParsePrefix(ignoreIp + "/32")
+			}
+
+			if err != nil || !network.IsValid() {
+				return fmt.Errorf("invalid ignoreIp given %s: %w", ignoreIp, err)
+			}
+
+			h.ignorePrefixes = append(h.ignorePrefixes, network)
 		}
+	}
+
+	if len(config.IgnoreURLs) > 0 {
+		for _, location := range config.IgnoreURLs {
+			r, err := regexp.Compile(location)
+			if err != nil {
+				return fmt.Errorf("failed to compile ignoreURL %s: %w", location, err)
+			}
+
+			h.ignoreRegexps = append(h.ignoreRegexps, *r)
+		}
+	}
+
+	return nil
+}
+
+func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	if !h.isDisabled && h.shouldTrack(req) {
+		go h.trackRequest(req)
 	}
 
 	h.next.ServeHTTP(rw, req)
 }
 
 func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
-	if len(h.ignoreUserAgents) > 0 {
-		userAgent := req.UserAgent()
-		for _, disabledUserAgent := range h.ignoreUserAgents {
-			if strings.Contains(userAgent, disabledUserAgent) {
-				return false
-			}
-		}
-	}
-
 	if len(h.ignorePrefixes) > 0 {
 		requestIp := req.Header.Get(h.headerIp)
 		if requestIp == "" {
@@ -229,12 +240,34 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 
 		for _, prefix := range h.ignorePrefixes {
 			if prefix.Contains(ip) {
+				h.debug("ignoring IP %s", ip)
+				return false
+			}
+		}
+	}
+
+	if len(h.ignoreUserAgents) > 0 {
+		userAgent := req.UserAgent()
+		for _, disabledUserAgent := range h.ignoreUserAgents {
+			if strings.Contains(userAgent, disabledUserAgent) {
+				h.debug("ignoring user-agent %s", userAgent)
+				return false
+			}
+		}
+	}
+
+	if len(h.ignoreRegexps) > 0 {
+		requestURL := req.URL.String()
+		for _, r := range h.ignoreRegexps {
+			if r.MatchString(requestURL) {
+				h.debug("ignoring location %s", requestURL)
 				return false
 			}
 		}
 	}
 
 	if !h.shouldTrackResource(req.URL.Path) {
+		h.debug("ignoring resource %s", req.URL.Path)
 		return false
 	}
 
@@ -247,6 +280,7 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 		return true
 	}
 
+	h.debug("ignoring domain %s", hostname)
 	return false
 }
 
@@ -269,18 +303,7 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 
 	// Check if the suffix is regarded to be "content".
 	switch pathExt {
-	case ".htm":
-	case ".html":
-	case ".xhtml":
-	case ".jsf":
-	case ".md":
-	case ".php":
-	case ".rss":
-	case ".rtf":
-	case ".txt":
-	case ".xml":
-	case ".pdf":
-	case "":
+	case "", ".htm", ".html", ".xhtml", ".jsf", ".md", ".php", ".rss", ".rtf", ".txt", ".xml", ".pdf":
 		return true
 	}
 
@@ -314,15 +337,15 @@ func (h *UmamiFeeder) trackRequest(req *http.Request) {
 
 func (h *UmamiFeeder) error(message string) {
 	if h.logHandler != nil {
-		time := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("%s ERR middlewareName=%s error=\"%s\"", time, h.name, message)
+		now := time.Now().Format("2006-01-02T15:04:05Z")
+		h.logHandler.Printf("%s ERR middlewareName=%s error=\"%s\"", now, h.name, message)
 	}
 }
 
 // Arguments are handled in the manner of [fmt.Printf].
 func (h *UmamiFeeder) debug(format string, v ...any) {
 	if h.logHandler != nil && h.isDebug {
-		time := time.Now().Format("2006-01-02T15:04:05Z")
-		h.logHandler.Printf("%s DBG middlewareName=%s msg=\"%s\"", time, h.name, fmt.Sprintf(format, v...))
+		now := time.Now().Format("2006-01-02T15:04:05Z")
+		h.logHandler.Printf("%s DBG middlewareName=%s msg=\"%s\"", now, h.name, fmt.Sprintf(format, v...))
 	}
 }

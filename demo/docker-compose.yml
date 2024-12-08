@@ -28,6 +28,10 @@ services:
 
   whoami:
     image: containous/whoami
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.whoami.loadbalancer.server.port=80"

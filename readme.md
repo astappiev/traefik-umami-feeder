@@ -82,15 +82,20 @@ entryPoints:
 
 ## Configuration
 
-| key                 | default | type       | description                                                                                                                                 |
-|---------------------|---------|------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| `umamiHost`         | -       | `string`   | Umami server url, reachable from within traefik (container), e.g. `http://umami:3000`                                                       |
-| `umamiToken`        | -       | `string`   | An API Token, used to automatize work with websites, not needed if you provide `websites`                                                   |
-| `umamiUsername`     | -       | `string`   | An alternative to `umamiToken`, you can provide an username and password                                                                    |
-| `umamiPassword`     | -       | `string`   | Only in combination with `umamiUsername`                                                                                                    |
-| `umamiTeamId`       | -       | `string`   | In order to organize websites, you can use Umami Teams                                                                                      |
-| `websites`          | -       | `map`      | A map of hostnames and their associated Umami IDs. Can also be used to override or extend fetched websites                                  |
-| `createNewWebsites` | false   | `bool`     | If set to `true`, will try to create a new website on Umami, if domain not found there                                                      |
-| `trackAllResources` | false   | `bool`     | Defines whether all requests for any resource should be tracked. By default, only requests that are believed to contain content are tracked |
-| `trackExtensions`   |         | `string[]` | Defines an alternative list of file extensions that should be tracked                                                                       |
-| `debug`             | false   | `bool`     | Something doesn't work? Set to `true` to see more logs (plugins doesn't have access to Traefik's log level)                                 |
+| key                 | default     | type       | description                                                                                                                                   |
+|---------------------|-------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `disabled`          | false       | `bool`     | Set to `true` to disable the plugin                                                                                                           |
+| `debug`             | false       | `bool`     | Something doesn't work? Set to `true` to see more logs (plugins doesn't have access to Traefik's log level)                                   |
+| `umamiHost`         | -           | `string`   | Umami server url, reachable from within traefik (container), e.g. `http://umami:3000`                                                         |
+| `umamiToken`        | -           | `string`   | An API Token, used to automatize work with websites, not needed if you provide `websites`                                                     |
+| `umamiUsername`     | -           | `string`   | An alternative to `umamiToken`, you can provide an username and password                                                                      |
+| `umamiPassword`     | -           | `string`   | Only in combination with `umamiUsername`                                                                                                      |
+| `umamiTeamId`       | -           | `string`   | In order to organize websites, you can use Umami Teams                                                                                        |
+| `websites`          | -           | `map`      | A map of hostnames and their associated Umami IDs. Can also be used to override or extend fetched websites                                    |
+| `createNewWebsites` | false       | `bool`     | If set to `true`, will try to create a new website on Umami, if domain not found there                                                        |
+| `trackAllResources` | false       | `bool`     | Defines whether all requests for any resource should be tracked. By default, only requests that are believed to contain content are tracked   |
+| `trackExtensions`   |             | `string[]` | Defines an alternative list of file extensions that should be tracked                                                                         |
+| `ignoreUserAgents`  |             | `string[]` | A list of user agents that should be ignored from tracking, e.g. `["Googlebot", "Uptime-Kuma"]` (matched with `strings.Contains`)             |
+| `ignoreURLs`        |             | `string[]` | A list of URLs that should be ignored from tracking, e.g. `["/health", "https?://[^/]+/health$"]` (matched with `regexp.Compile.MatchString`) |
+| `ignoreIPs`         |             | `string[]` | A list of IPs that should be ignored from tracking, e.g. `["127.0.0.1", "10.0.0.1/16"]` (matched with `netip.ParsePrefix.Contains`)           |
+| `headerIp`          | `X-Real-Ip` | `string`   | The header to use to get the real IP address of the client, in case it's forwarded by a proxy                                                 |
