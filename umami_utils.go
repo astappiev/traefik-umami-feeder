@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
+	"time"
 )
 
-func sendRequest(url string, body interface{}, headers http.Header) (*http.Response, error) {
+func sendRequest(ctx context.Context, url string, body interface{}, headers http.Header) (*http.Response, error) {
 	var req *http.Request
 	var err error
 
@@ -19,9 +22,9 @@ func sendRequest(url string, body interface{}, headers http.Header) (*http.Respo
 			return nil, err
 		}
 
-		req, err = http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bodyJson))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJson))
 	} else {
-		req, err = http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	}
 
 	if err != nil {
@@ -36,27 +39,28 @@ func sendRequest(url string, body interface{}, headers http.Header) (*http.Respo
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{}
-	response, err := client.Do(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 
-	status := response.StatusCode
+	status := resp.StatusCode
 	if status < 200 || status >= 300 {
 		return nil, fmt.Errorf("request failed with status %d", status)
 	}
 
-	return response, nil
+	return resp, nil
 }
 
-func sendRequestAndParse(url string, body interface{}, headers http.Header, value interface{}) error {
-	resp, err := sendRequest(url, body, headers)
-
+func sendRequestAndParse(ctx context.Context, url string, body interface{}, headers http.Header, value interface{}) error {
+	resp, err := sendRequest(ctx, url, body, headers)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -69,4 +73,33 @@ func sendRequestAndParse(url string, body interface{}, headers http.Header, valu
 	}
 
 	return nil
+}
+
+// opts the port from the host.
+func parseDomainFromHost(host string) string {
+	// check if the host has a port
+	if strings.Contains(host, ":") {
+		host = strings.Split(host, ":")[0]
+	}
+	return strings.ToLower(host)
+}
+
+const parseAcceptLanguagePattern = `([a-zA-Z\-]+)(?:;q=\d\.\d)?(?:,\s)?`
+
+var parseAcceptLanguageRegexp = regexp.MustCompile(parseAcceptLanguagePattern)
+
+func parseAcceptLanguage(acceptLanguage string) string {
+	matches := parseAcceptLanguageRegexp.FindAllStringSubmatch(acceptLanguage, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0][1]
+}
+
+func copyHeaders(dst, src http.Header, headersToCopy []string) {
+	for _, key := range headersToCopy {
+		if values := src.Values(key); len(values) > 0 {
+			dst[key] = values
+		}
+	}
 }

@@ -19,6 +19,8 @@ type Config struct {
 	Disabled bool `json:"disabled"`
 	// Debug enables debug logging, be prepared for flooding.
 	Debug bool `json:"debug"`
+	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Umami.
+	QueueSize int
 
 	// UmamiHost is the URL of the Umami instance.
 	UmamiHost string `json:"umamiHost"`
@@ -56,8 +58,9 @@ type Config struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Disabled: false,
-		Debug:    false,
+		Disabled:  false,
+		Debug:     false,
+		QueueSize: 1000,
 
 		UmamiHost:     "",
 		UmamiToken:    "",
@@ -85,6 +88,7 @@ type UmamiFeeder struct {
 	isDebug    bool
 	isDisabled bool
 	logHandler *log.Logger
+	queue      chan *UmamiPayload
 
 	umamiHost         string
 	umamiToken        string
@@ -110,6 +114,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		isDebug:    config.Debug,
 		isDisabled: config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
+		// Umami API does not support batching https://github.com/umami-software/umami/discussions/1473
+		queue: make(chan *UmamiPayload, config.QueueSize),
 
 		umamiHost:         config.UmamiHost,
 		umamiToken:        config.UmamiToken,
@@ -127,7 +133,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	if !h.isDisabled {
-		err := h.connect(config)
+		err := h.connect(ctx, config)
 		if err != nil {
 			h.error(err.Error())
 			h.error("unable to connect to Umami, the plugin is disabled")
@@ -140,18 +146,20 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 			h.error("configuration error, the plugin is disabled")
 			h.isDisabled = true
 		}
+
+		go h.startWorker(ctx)
 	}
 
 	return h, nil
 }
 
-func (h *UmamiFeeder) connect(config *Config) error {
+func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 	if h.umamiHost == "" {
 		return fmt.Errorf("`umamiHost` is not set")
 	}
 
 	if config.UmamiUsername != "" && config.UmamiPassword != "" {
-		token, err := getToken(h.umamiHost, config.UmamiUsername, config.UmamiPassword)
+		token, err := getToken(ctx, h.umamiHost, config.UmamiUsername, config.UmamiPassword)
 		if err != nil {
 			return fmt.Errorf("failed to get token: %w", err)
 		}
@@ -169,7 +177,7 @@ func (h *UmamiFeeder) connect(config *Config) error {
 	}
 
 	if h.umamiToken != "" {
-		websites, err := fetchWebsites(h.umamiHost, h.umamiToken, h.umamiTeamId)
+		websites, err := fetchWebsites(ctx, h.umamiHost, h.umamiToken, h.umamiTeamId)
 		if err != nil {
 			return fmt.Errorf("failed to fetch websites: %w", err)
 		}
@@ -219,7 +227,7 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if !h.isDisabled && h.shouldTrack(req) {
-		go h.trackRequest(req)
+		h.submitToFeed(req)
 	}
 
 	h.next.ServeHTTP(rw, req)
@@ -308,31 +316,6 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 	}
 
 	return false
-}
-
-func (h *UmamiFeeder) trackRequest(req *http.Request) {
-	hostname := parseDomainFromHost(req.Host)
-	websiteId, ok := h.websites[hostname]
-	if !ok {
-		website, err := createWebsite(h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
-		if err != nil {
-			h.error("failed to create website: " + err.Error())
-			return
-		}
-
-		h.websites[website.Domain] = website.ID
-		websiteId = website.ID
-		h.debug("created website for: %s", website.Domain)
-	}
-
-	sendBody, sendHeaders := buildSendBody(req, websiteId)
-	h.debug("sending tracking request %s with body %v %v", req.URL, sendBody, sendHeaders)
-
-	_, err := sendRequest(h.umamiHost+"/api/send", sendBody, sendHeaders)
-	if err != nil {
-		h.error("failed to send tracking: " + err.Error())
-		return
-	}
 }
 
 func (h *UmamiFeeder) error(message string) {

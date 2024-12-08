@@ -1,6 +1,7 @@
 package traefik_umami_feeder
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -21,12 +22,12 @@ type Website struct {
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 }
 
-func createWebsite(umamiHost string, umamiToken string, teamId string, websiteDomain string) (*Website, error) {
+func createWebsite(ctx context.Context, umamiHost string, umamiToken string, teamId string, websiteDomain string) (*Website, error) {
 	var headers = make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
 	var result Website
-	err := sendRequestAndParse(umamiHost+"/api/websites", Website{
+	err := sendRequestAndParse(ctx, umamiHost+"/api/websites", Website{
 		Name:   websiteDomain,
 		Domain: websiteDomain,
 		TeamId: teamId,
@@ -39,7 +40,7 @@ func createWebsite(umamiHost string, umamiToken string, teamId string, websiteDo
 	return &result, nil
 }
 
-func fetchWebsites(umamiHost string, umamiToken string, teamId string) (*[]Website, error) {
+func fetchWebsites(ctx context.Context, umamiHost string, umamiToken string, teamId string) (*[]Website, error) {
 	var headers = make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
@@ -49,7 +50,7 @@ func fetchWebsites(umamiHost string, umamiToken string, teamId string) (*[]Websi
 	}
 
 	var result WebsitesResponse
-	err := sendRequestAndParse(url, nil, headers, &result)
+	err := sendRequestAndParse(ctx, url, nil, headers, &result)
 
 	if err != nil {
 		return nil, err
