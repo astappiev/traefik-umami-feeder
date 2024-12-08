@@ -41,7 +41,7 @@ func parseDomainFromHost(host string) string {
 	if strings.Contains(host, ":") {
 		host = strings.Split(host, ":")[0]
 	}
-	return host
+	return strings.ToLower(host)
 }
 
 const parseAcceptLanguagePattern = `([a-zA-Z\-]+)(?:;q=\d\.\d)?(?:,\s)?`
