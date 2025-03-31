@@ -10,6 +10,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,6 +22,10 @@ type Config struct {
 	Debug bool `json:"debug"`
 	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Umami.
 	QueueSize int `json:"queueSize"`
+	// BatchSize defines the amount of events that are submitted to Umami in one request.
+	BatchSize int `json:"batchSize"`
+	// BatchMaxWait defines the maximum time to wait before submitting the batch.
+	BatchMaxWait time.Duration `json:"batchMaxWait"`
 
 	// UmamiHost is the URL of the Umami instance.
 	UmamiHost string `json:"umamiHost"`
@@ -60,10 +65,12 @@ type Config struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Disabled:    false,
-		Debug:       false,
-		QueueSize:   1000,
-		TrackErrors: false,
+		Disabled:     false,
+		Debug:        false,
+		QueueSize:    1000,
+		BatchSize:    20,
+		BatchMaxWait: 5 * time.Second,
+		TrackErrors:  false,
 
 		UmamiHost:     "",
 		UmamiToken:    "",
@@ -93,10 +100,14 @@ type UmamiFeeder struct {
 	logHandler *log.Logger
 	queue      chan *UmamiEvent
 
+	batchSize    int
+	batchMaxWait time.Duration
+
 	umamiHost         string
 	umamiToken        string
 	umamiTeamId       string
 	websites          map[string]string
+	websitesMutex     sync.RWMutex
 	createNewWebsites bool
 
 	trackErrors       bool
@@ -121,10 +132,14 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		// Umami API does not support batching https://github.com/umami-software/umami/discussions/1473
 		queue: make(chan *UmamiEvent, config.QueueSize),
 
+		batchSize:    config.BatchSize,
+		batchMaxWait: config.BatchMaxWait,
+
 		umamiHost:         config.UmamiHost,
 		umamiToken:        config.UmamiToken,
 		umamiTeamId:       config.UmamiTeamId,
 		websites:          config.Websites,
+		websitesMutex:     sync.RWMutex{},
 		createNewWebsites: config.CreateNewWebsites,
 
 		trackErrors:       config.TrackErrors,
@@ -191,7 +206,7 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 			}
 
 			h.websites[website.Domain] = website.ID
-			h.debug("fetched websiteId for: %s", website.Domain)
+			h.debug("website fetched '%s': %s", website.Domain, website.ID)
 		}
 	}
 

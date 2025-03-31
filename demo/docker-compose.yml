@@ -1,6 +1,8 @@
 services:
   traefik:
     image: traefik:3
+    depends_on:
+      - umami
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik.service=api@internal"
@@ -47,8 +49,11 @@ services:
   umami:
     image: ghcr.io/umami-software/umami:postgresql-latest
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
+      - DEBUG=umami:middleware
+      - ENABLE_TEST_CONSOLE=1
       - DATABASE_URL=postgres://umami:umami@postgres:5432/umami
     ports:
       - target: 3000
@@ -68,6 +73,11 @@ services:
       - umami_postgres
     volumes:
       - ./postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 networks:
   traefik:

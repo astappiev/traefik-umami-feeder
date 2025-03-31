@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type WebsitesResponse struct {
+type websitesResponse struct {
 	Data     []Website `json:"data"`
 	Count    int       `json:"count"`
 	Page     int       `json:"page"`
@@ -49,7 +49,7 @@ func fetchWebsites(ctx context.Context, umamiHost string, umamiToken string, tea
 		url = umamiHost + "/api/teams/" + teamId + "/websites?pageSize=200"
 	}
 
-	var result WebsitesResponse
+	var result websitesResponse
 	err := sendRequestAndParse(ctx, url, nil, headers, &result)
 
 	if err != nil {
@@ -57,4 +57,31 @@ func fetchWebsites(ctx context.Context, umamiHost string, umamiToken string, tea
 	}
 
 	return &result.Data, nil
+}
+
+func getWebsiteId(h *UmamiFeeder, hostname string) string {
+	h.websitesMutex.RLock()
+	websiteId, ok := h.websites[hostname]
+	h.websitesMutex.RUnlock()
+
+	if ok {
+		return websiteId
+	}
+
+	h.websitesMutex.Lock()
+	defer h.websitesMutex.Unlock()
+
+	// Create a background context for the API call
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	website, err := createWebsite(ctx, h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
+	if err != nil {
+		h.error("failed to create website: " + err.Error())
+		return ""
+	}
+
+	h.websites[website.Domain] = website.ID
+	h.debug("website created '%s': %s", website.Domain, website.ID)
+	return website.ID
 }

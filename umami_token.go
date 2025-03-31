@@ -2,18 +2,18 @@ package traefik_umami_feeder
 
 import "context"
 
-type Auth struct {
+type authRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-type AuthResponse struct {
+type authResponse struct {
 	Token string `json:"token"`
 }
 
 func getToken(ctx context.Context, umamiHost string, umamiUsername string, umamiPassword string) (string, error) {
-	var result AuthResponse
-	err := sendRequestAndParse(ctx, umamiHost+"/api/auth/login", Auth{
+	var result authResponse
+	err := sendRequestAndParse(ctx, umamiHost+"/api/auth/login", authRequest{
 		Username: umamiUsername,
 		Password: umamiPassword,
 	}, nil, &result)

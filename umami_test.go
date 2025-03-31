@@ -8,8 +8,6 @@ import (
 )
 
 func TestTraefikUmamiFeeder(t *testing.T) {
-	t.Skip("requires a running Umami instance, see /demo/docker-compose.yml")
-
 	cfg := CreateConfig()
 	cfg.UmamiHost = "http://localhost:3000"
 	cfg.UmamiUsername = "admin"

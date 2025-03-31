@@ -3,6 +3,7 @@ package traefik_umami_feeder
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -28,14 +29,23 @@ type SendBody struct {
 }
 
 func (h *UmamiFeeder) submitToFeed(req *http.Request, code int) {
+	hostname := parseDomainFromHost(req.Host)
+	websiteId := getWebsiteId(h, hostname)
+
+	if websiteId == "" {
+		h.error("tracking skipped, websiteId is unknown: " + hostname)
+		return
+	}
+
 	event := &UmamiEvent{
-		Hostname:  parseDomainFromHost(req.Host),
+		Hostname:  hostname,
 		Language:  parseAcceptLanguage(req.Header.Get("Accept-Language")),
 		Referrer:  req.Referer(),
 		Url:       req.URL.String(),
 		Ip:        extractRemoteIP(req),
 		UserAgent: req.Header.Get("User-Agent"),
 		Timestamp: time.Now().Unix(),
+		Website:   websiteId,
 	}
 
 	select {
@@ -65,49 +75,47 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 		}
 	}()
 
+	batch := make([]*SendBody, 0, h.batchSize)
+	timeout := time.NewTimer(h.batchMaxWait)
+
 	for {
 		// Wait for event.
 		select {
 		case <-ctx.Done():
 			h.debug("worker shutting down (canceled)")
+			if len(batch) > 0 {
+				h.reportEventsToUmami(ctx, batch)
+			}
 			return nil
 
 		case event := <-h.queue:
-			h.reportEventToUmami(ctx, event)
+			batch = append(batch, &SendBody{Payload: event, Type: "event"})
+			if len(batch) >= h.batchSize {
+				h.reportEventsToUmami(ctx, batch)
+				batch = make([]*SendBody, 0, h.batchSize)
+				timeout.Reset(h.batchMaxWait)
+			}
+
+		case <-timeout.C:
+			if len(batch) > 0 {
+				h.reportEventsToUmami(ctx, batch)
+				batch = make([]*SendBody, 0, h.batchSize)
+			}
+			timeout.Reset(h.batchMaxWait)
 		}
 	}
 }
 
-func (h *UmamiFeeder) reportEventToUmami(ctx context.Context, event *UmamiEvent) {
-	hostname := event.Hostname
-	websiteId, ok := h.websites[hostname]
-	if !ok {
-		website, err := createWebsite(ctx, h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
-		if err != nil {
-			h.error("failed to create website: " + err.Error())
-			return
-		}
-
-		h.websites[website.Domain] = website.ID
-		websiteId = website.ID
-		h.debug("created website for: %s", website.Domain)
-	}
-	if websiteId == "" {
-		h.error("skip tracking, websiteId is unknown: " + hostname)
-		return
-	}
-	event.Website = websiteId
-
-	body := SendBody{
-		Payload: event,
-		Type:    "event",
-	}
-
-	h.debug("sending tracking request %v", event)
-	resp, err := sendRequest(ctx, h.umamiHost+"/api/send", body, nil)
+func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBody) {
+	h.debug("reporting %d events", len(events))
+	resp, err := sendRequest(ctx, h.umamiHost+"/api/batch", events, nil)
 	if err != nil {
 		h.error("failed to send tracking: " + err.Error())
 		return
+	}
+	if h.isDebug {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		h.debug("%v: %s", resp.Status, string(bodyBytes))
 	}
 	defer func() {
 		_ = resp.Body.Close()
