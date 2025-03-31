@@ -89,6 +89,9 @@ func parseDomainFromHost(host string) string {
 	if strings.Contains(host, ":") {
 		host = strings.Split(host, ":")[0]
 	}
+	if strings.HasSuffix(host, ".") {
+		host = strings.TrimSuffix(host, ".")
+	}
 	return strings.ToLower(host)
 }
 
