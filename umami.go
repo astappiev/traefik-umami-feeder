@@ -91,7 +91,7 @@ type UmamiFeeder struct {
 	isDebug    bool
 	isDisabled bool
 	logHandler *log.Logger
-	queue      chan *UmamiPayload
+	queue      chan *UmamiEvent
 
 	umamiHost         string
 	umamiToken        string
@@ -119,7 +119,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		isDisabled: config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 		// Umami API does not support batching https://github.com/umami-software/umami/discussions/1473
-		queue: make(chan *UmamiPayload, config.QueueSize),
+		queue: make(chan *UmamiEvent, config.QueueSize),
 
 		umamiHost:         config.UmamiHost,
 		umamiToken:        config.UmamiToken,

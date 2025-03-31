@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -83,7 +84,6 @@ func sendRequestAndParse(ctx context.Context, url string, body interface{}, head
 	return nil
 }
 
-// opts the port from the host.
 func parseDomainFromHost(host string) string {
 	// check if the host has a port
 	if strings.Contains(host, ":") {
@@ -102,4 +102,37 @@ func parseAcceptLanguage(acceptLanguage string) string {
 		return ""
 	}
 	return matches[0][1]
+}
+
+func extractRemoteIP(req *http.Request) string {
+	if ip := req.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+
+	if ip := req.Header.Get("x-vercel-ip"); ip != "" {
+		return ip
+	}
+
+	// Standard proxy headers
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	if xrip := req.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+
+	// Direct connection
+	if req.RemoteAddr != "" {
+		ip, _, err := net.SplitHostPort(req.RemoteAddr)
+		if err == nil {
+			return ip
+		}
+		return req.RemoteAddr
+	}
+
+	return ""
 }
