@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/netip"
 	"os"
@@ -129,9 +130,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		isDebug:    config.Debug,
 		isDisabled: config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
-		// Umami API does not support batching https://github.com/umami-software/umami/discussions/1473
-		queue: make(chan *UmamiEvent, config.QueueSize),
 
+		queue:        make(chan *UmamiEvent, config.QueueSize),
 		batchSize:    config.BatchSize,
 		batchMaxWait: config.BatchMaxWait,
 
@@ -153,22 +153,56 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	if !h.isDisabled {
-		err := h.connect(ctx, config)
-		if err != nil {
-			h.error("unable to connect to Umami, the plugin is disabled: " + err.Error())
-			h.isDisabled = true
-		}
-
-		err = h.verifyConfig(config)
-		if err != nil {
-			h.error("configuration error, the plugin is disabled: " + err.Error())
-			h.isDisabled = true
-		}
-
-		go h.startWorker(ctx)
+		h.isDisabled = true
+		go h.retryConnection(ctx, config)
 	}
 
 	return h, nil
+}
+
+func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
+	const maxRetryInterval = time.Hour
+	retryAttempt := 0
+	for {
+		currentDelay := maxRetryInterval
+		if retryAttempt == 0 {
+			currentDelay = 0
+		} else if retryAttempt < 8 {
+			currentDelay = time.Duration(15*math.Pow(2, float64(retryAttempt))) * time.Second
+		}
+
+		if retryAttempt > 0 { // Don't log for the immediate first attempt
+			h.debug("Next connection attempt in %v (attempt #%d).", currentDelay, retryAttempt+1)
+		}
+
+		select {
+		case <-time.After(currentDelay):
+			retryAttempt++
+			h.debug("Attempting to connect to Umami (attempt #%d)...", retryAttempt)
+
+			err := h.connect(ctx, config)
+			if err == nil {
+				h.debug("Successfully connected to Umami. Verifying configuration...")
+
+				err = h.verifyConfig(config)
+				if err == nil {
+					h.debug("Configuration verified. Enabling plugin and starting worker.")
+					h.isDisabled = false
+					go h.startWorker(ctx)
+					return // Successfully connected and configured, exit retry goroutine
+				}
+
+				h.error("configuration error, the plugin is disabled: " + err.Error())
+				h.isDisabled = true
+				return // Exit retry goroutine, plugin remains disabled.
+			}
+
+			h.error("Failed to reconnect to Umami: " + err.Error())
+		case <-ctx.Done():
+			h.debug("Context cancelled during retryConnection, stopping connection retries.")
+			return
+		}
+	}
 }
 
 func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
@@ -206,8 +240,8 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 			}
 
 			h.websites[website.Domain] = website.ID
-			h.debug("website fetched '%s': %s", website.Domain, website.ID)
 		}
+		h.debug("websites fetched: %v", h.websites)
 	}
 
 	return nil
