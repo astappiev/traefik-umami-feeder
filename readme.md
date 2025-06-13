@@ -23,13 +23,13 @@ experimental:
   plugins:
     umami-feeder:
       moduleName: github.com/astappiev/traefik-umami-feeder
-      version: v1.0.0 # replace with latest version available
+      version: v1.3.0 # replace with latest version available
 ```
 
 ```toml
 [experimental.plugins.umami-feeder]
   moduleName = "github.com/astappiev/traefik-umami-feeder"
-  version = "v1.0.0" # replace with latest version available
+  version = "v1.3.0" # replace with latest version available
 ```
 
 With the plugin installed, you can configure a middleware in a dynamic configuration such as a `config.yml` or docker
