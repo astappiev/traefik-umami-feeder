@@ -1,39 +1,50 @@
-# Traefik Umami Feeder
+# Traefik Umami Feeder Plugin
 
-This plugin for enables [Traefik Reverse Proxy](https://traefik.io/traefik/) to feed [Umami Analytics](https://umami.is)
-with tracking events.
+A [Traefik](https://traefik.io/traefik/) middleware plugin that sends visits to your [Umami](https://umami.is) instance.
 
 It was created as an alternative to [traefik-umami-plugin](https://github.com/1cedsoda/traefik-umami-plugin) and
-inspired by idea of [Plausible Feeder Traefik Plugin](https://github.com/safing/plausiblefeeder).
+inspired by the [Plausible Feeder Traefik Plugin](https://github.com/safing/plausiblefeeder).
 
-## Features
+## Introduction
 
-- [X] Super easy to setup, one middleware for all websites
-- [X] Server Side Tracking, no need to add JavaScript to your websites
-- [X] Fast and private analytics
+This plugin integrates your Traefik-proxied services with Umami, a simple, fast, privacy-focused analytics solution. It
+captures basic request information (path, user-agent, referrer, screen size, IP) and forwards it to your Umami instance,
+enabling server-side analytics.
 
-## Installation
+Key features:
 
-To [add this plugin to traefik](https://plugins.traefik.io/install) reference this repository as a plugin in the static
-config.
-The version references a git tag.
+- Stupidly simple to setup, one middleware for all websites possible
+- Server-Side Tracking, no JS or Cookies bullshit
+- Fast and private
+
+## Configuration
+
+### Step 1. Add the plugin to Traefik
+
+Declare the plugin in your Traefik **static configuration**.
 
 ```yaml
 experimental:
   plugins:
     umami-feeder:
       moduleName: github.com/astappiev/traefik-umami-feeder
-      version: v1.3.0 # replace with latest version available
+      version: v1.3.0 # Replace with the latest version
 ```
 
-```toml
-[experimental.plugins.umami-feeder]
-  moduleName = "github.com/astappiev/traefik-umami-feeder"
-  version = "v1.3.0" # replace with latest version available
-```
+### Step 2. Configure the middleware
 
-With the plugin installed, you can configure a middleware in a dynamic configuration such as a `config.yml` or docker
-labels.
+Once the plugin is declared, configure it as a middleware in your Traefik **dynamic configuration**.
+
+You can specify which websites to track in two ways:
+
+1. **Manual**: Directly provide a `websites` map, associating hostnames with their Umami Website IDs.
+2. **Automatic**: Configure the plugin with your Umami API `umamiToken`, or `umamiUsername` and `umamiPassword`. The
+   plugin will then automatically fetch the list of websites and their IDs from your Umami instance.
+    * Optionally, use `umamiTeamId` to scope website retrieval to a specific team.
+    * Optionally, enable `createNewWebsites` to allow the plugin to create new website entries in Umami if they don't
+      already exist.
+
+See the [Middleware Options](#middleware-options) section for detailed configuration options.
 
 ```yaml
 http:
@@ -41,36 +52,49 @@ http:
     my-umami-middleware:
       plugin:
         umami-feeder:
-          umamiHost: "http://umami:3000"
-          websites:
-            "example.com": "d4617504-241c-4797-8eab-5939b367b3ad"
+          umamiHost: "http://umami:3000" # URL of your Umami instance
+
+          # Option 1: Define the list of websites
+          # websites:
+          #   "example.com": "d4617504-241c-4797-8eab-5939b367b3ad"
+
+          # Option 2: Use Umami credentials to fetch websites
+          umamiUsername: "your-umami-username"
+          umamiPassword: "your-umami-password"
+          # umamiToken: "your-umami-api-token" # Alternative to username/password
+
+          # Optional: allow creation of new websites in Umami
+          createNewWebsites: true
 ```
 
-```toml
-[http.middlewares]
-  [http.middlewares.my-umami-middleware.plugin.umami-feeder]
-    umamiHost = "umami:3000"
+### Step 3. Attach the middleware to your routers
 
-    [http.middlewares.my-umami-middleware.plugin.umami-feeder.websites]
-      "example.com" = "d4617504-241c-4797-8eab-5939b367b3ad"
-```
+Apply the [configured middleware](https://doc.traefik.io/traefik/routing/routers/#middlewares_1) to the Traefik routers
+you want to track with Umami. This is also done in your **dynamic configuration**.
 
-You have an option to give a list of domains to track (and their website IDs on Umami). \
-Or, you can give a token and the list will be fetched from Umami. For this, you need
-either [retrieve the token yourself](https://umami.is/docs/api/authentication), or use
-username/password instead.
+Remember to use the
+correct [provider namespace](https://doc.traefik.io/traefik/providers/overview/#provider-namespace)  (e.g., `@file` if
+your middleware is defined in a file, `@docker` if defined via Docker labels).
 
-After that, you need to add the middleware to a [router](https://doc.traefik.io/traefik/routing/routers/#middlewares_1).
-Remember to reference the
-correct [provider namespace](https://doc.traefik.io/traefik/providers/overview/#provider-namespace).
-
-E.g. as Docker labels:
+**Example using Docker labels:**
 
 ```yaml
 - "traefik.http.routers.whoami.middlewares=my-umami-middleware@file"
 ```
 
-Or, for all routers in a static configuration:
+**Example using a dynamic configuration file (e.g., `dynamic_conf.yml`):**
+
+```yaml
+http:
+  routers:
+    whoami:
+      rule: "Host(`example.com`)"
+      middlewares:
+        - my-umami-middleware@file
+```
+
+**Example using static configuration (e.g., `traefik.yml`), by attaching the middleware to an entryPoint to apply it
+globally:**
 
 ```yaml
 entryPoints:
@@ -80,24 +104,32 @@ entryPoints:
         - my-umami-middleware@file
 ```
 
-## Configuration
+## Middleware Options
 
-| key                 | default     | type       | description                                                                                                                                   |
-|---------------------|-------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `disabled`          | false       | `bool`     | Set to `true` to disable the plugin                                                                                                           |
-| `debug`             | false       | `bool`     | Something doesn't work? Set to `true` to see more logs (plugins doesn't have access to Traefik's log level)                                   |
-| `queueSize`         | 1000        | `int`      | The maximum number of events that can be queued before they are sent to the Umami server                                                      |
-| `umamiHost`         | -           | `string`   | Umami server url, reachable from within traefik (container), e.g. `http://umami:3000`                                                         |
-| `umamiToken`        | -           | `string`   | An API Token, used to automatize work with websites, not needed if you provide `websites`                                                     |
-| `umamiUsername`     | -           | `string`   | An alternative to `umamiToken`, you can provide an username and password                                                                      |
-| `umamiPassword`     | -           | `string`   | Only in combination with `umamiUsername`                                                                                                      |
-| `umamiTeamId`       | -           | `string`   | In order to organize websites, you can use Umami Teams                                                                                        |
-| `websites`          | -           | `map`      | A map of hostnames and their associated Umami IDs. Can also be used to override or extend fetched websites                                    |
-| `createNewWebsites` | false       | `bool`     | If set to `true`, will try to create a new website on Umami, if domain not found there                                                        |
-| `trackErrors`       | false       | `bool`     | If set to `true`, will track errors (status codes >= 400)                                                                                     |
-| `trackAllResources` | false       | `bool`     | Defines whether all requests for any resource should be tracked. By default, only requests that are believed to contain content are tracked   |
-| `trackExtensions`   |             | `string[]` | Defines an alternative list of file extensions that should be tracked                                                                         |
-| `ignoreUserAgents`  |             | `string[]` | A list of user agents that should be ignored from tracking, e.g. `["Googlebot", "Uptime-Kuma"]` (matched with `strings.Contains`)             |
-| `ignoreURLs`        |             | `string[]` | A list of URLs that should be ignored from tracking, e.g. `["/health", "https?://[^/]+/health$"]` (matched with `regexp.Compile.MatchString`) |
-| `ignoreIPs`         |             | `string[]` | A list of IPs that should be ignored from tracking, e.g. `["127.0.0.1", "10.0.0.1/16"]` (matched with `netip.ParsePrefix.Contains`)           |
-| `headerIp`          | `X-Real-Ip` | `string`   | The header to use to get the real IP address of the client, in case it's forwarded by a proxy                                                 |
+| key                 | default         | type       | description                                                                                                                                                                                                  |
+|---------------------|-----------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `disabled`          | `false`         | `bool`     | Set to `true` to disable the plugin.                                                                                                                                                                         |
+| `debug`             | `false`         | `bool`     | Set to `true` for verbose logging. Useful for troubleshooting as plugins don't inherit Traefik's global log level.                                                                                           |
+| `queueSize`         | `1000`          | `int`      | Maximum number of tracking events to queue before sending to the Umami server.                                                                                                                               |
+| `umamiHost`         | **required**    | `string`   | URL of your Umami instance, reachable from Traefik (e.g., `http://umami:3000`).                                                                                                                              |
+| `umamiToken`        | -               | `string`   | [Umami API Token](https://umami.is/docs/api/authentication) for authenticating with your Umami instance. Use this *or* `umamiUsername`/`umamiPassword`. Required for automatic website fetching or creation. |
+| `umamiUsername`     | -               | `string`   | Username for Umami authentication. Use this with `umamiPassword` if not using `umamiToken`. Required for automatic website fetching or creation.                                                             |
+| `umamiPassword`     | -               | `string`   | Password for Umami authentication, used in conjunction with `umamiUsername`.                                                                                                                                 |
+| `umamiTeamId`       | -               | `string`   | Optional. If using automatic mode, specifies the Umami Team ID to scope website fetching/creation.                                                                                                           |
+| `websites`          | -               | `map`      | A map of `hostname: umamiWebsiteID`. Used for manual website configuration or to override/extend websites fetched in automatic mode.                                                                         |
+| `createNewWebsites` | `false`         | `bool`     | If `true` and using automatic mode, the plugin will attempt to create a new website entry in Umami if the domain is not found.                                                                               |
+| `trackErrors`       | `false`         | `bool`     | If `true`, tracks errors (status codes >= 400).                                                                                                                                                              |
+| `trackAllResources` | `false`         | `bool`     | If `true`, tracks requests for all resources. By default, only requests likely to be page views (e.g., HTML, or no specific extension) are tracked.                                                          |
+| `trackExtensions`   | `[see sources]` | `string[]` | A list of specific file extensions to track (e.g., `[".html", ".php"]`).                                                                                                                                     |
+| `ignoreUserAgents`  | `[]`            | `string[]` | A list of user-agent substrings. Requests with matching user-agents will be ignored (e.g., `["Googlebot", "Uptime-Kuma"]`). Matched with `strings.Contains`.                                                 |
+| `ignoreURLs`        | `[]`            | `string[]` | A list of regular expressions. Requests with URLs matching any of these patterns will be ignored (e.g., `["/health", "https?://[^/]+/health$"]`). Matched with `regexp.Compile.MatchString`.                 |
+| `ignoreIPs`         | `[]`            | `string[]` | A list of IP addresses or CIDR ranges to ignore (e.g., `["127.0.0.1", "10.0.0.1/16"]`). Matched with `netip.ParsePrefix.Contains`.                                                                           |
+| `headerIp`          | `X-Real-Ip`     | `string`   | The HTTP header to inspect for the client's real IP address, typically used when Traefik is behind another proxy.                                                                                            |
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a pull request or open an issue.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
