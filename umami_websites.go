@@ -71,6 +71,11 @@ func getWebsiteId(h *UmamiFeeder, hostname string) string {
 	h.websitesMutex.Lock()
 	defer h.websitesMutex.Unlock()
 
+	// Double-check after acquiring write lock to prevent race condition
+	if websiteId, ok := h.websites[hostname]; ok {
+		return websiteId
+	}
+
 	// Create a background context for the API call
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

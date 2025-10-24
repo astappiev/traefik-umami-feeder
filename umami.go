@@ -236,13 +236,13 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 			return fmt.Errorf("failed to fetch websites: %w", err)
 		}
 
+		h.websitesMutex.Lock()
 		for _, website := range *websites {
-			if _, ok := h.websites[website.Domain]; ok {
-				continue
+			if _, ok := h.websites[website.Domain]; !ok {
+				h.websites[website.Domain] = website.ID
 			}
-
-			h.websites[website.Domain] = website.ID
 		}
+		h.websitesMutex.Unlock()
 		h.debug("websites fetched: %v", h.websites)
 	}
 
@@ -347,9 +347,12 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 	}
 
 	hostname := parseDomainFromHost(req.Host)
+	h.websitesMutex.RLock()
 	if _, ok := h.websites[hostname]; ok {
+		h.websitesMutex.RUnlock()
 		return true
 	}
+	h.websitesMutex.RUnlock()
 
 	h.debug("ignoring domain %s", hostname)
 	return false
