@@ -3,7 +3,7 @@
 A [Traefik](https://traefik.io/traefik/) middleware plugin that sends visits to your [Umami](https://umami.is) instance.
 
 It was created as an alternative to [traefik-umami-plugin](https://github.com/1cedsoda/traefik-umami-plugin) and
-inspired by the [Plausible Feeder Traefik Plugin](https://github.com/safing/plausiblefeeder).
+was inspired by the [Plausible Feeder Traefik Plugin](https://github.com/safing/plausiblefeeder).
 
 ## Introduction
 
@@ -13,7 +13,7 @@ enabling server-side analytics.
 
 Key features:
 
-- Stupidly simple to setup, one middleware for all websites possible
+- Stupidly simple to set up — one middleware can be used for all websites
 - Server-Side Tracking, no JS or Cookies bullshit
 - Fast and private
 
@@ -108,7 +108,7 @@ entryPoints:
 
 | key                 | default         | type       | description                                                                                                                                                                                                  |
 |---------------------|-----------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `disabled`          | `false`         | `bool`     | Set to `true` to disable the plugin.                                                                                                                                                                         |
+| `enabled`           | `true`          | `bool`     | Set to `false` to disable the plugin.                                                                                                                                                                        |
 | `debug`             | `false`         | `bool`     | Set to `true` for verbose logging. Useful for troubleshooting as plugins don't inherit Traefik's global log level.                                                                                           |
 | `queueSize`         | `1000`          | `int`      | Maximum number of tracking events to queue before sending to the Umami server.                                                                                                                               |
 | `umamiHost`         | **required**    | `string`   | URL of your Umami instance, reachable from Traefik (e.g., `http://umami:3000`).                                                                                                                              |
@@ -118,13 +118,13 @@ entryPoints:
 | `umamiTeamId`       | -               | `string`   | Optional. If using automatic mode, specifies the Umami Team ID to scope website fetching/creation.                                                                                                           |
 | `websites`          | -               | `map`      | A map of `hostname: umamiWebsiteID`. Used for manual website configuration or to override/extend websites fetched in automatic mode.                                                                         |
 | `createNewWebsites` | `false`         | `bool`     | If `true` and using automatic mode, the plugin will attempt to create a new website entry in Umami if the domain is not found.                                                                               |
-| `trackErrors`       | `false`         | `bool`     | If `true`, tracks errors (status codes >= 400).                                                                                                                                                              |
+| `trackErrors`       | `false`         | `bool`     | If `true`, tracks HTTP errors (status codes >= 400).                                                                                                                                                         |
 | `trackAllResources` | `false`         | `bool`     | If `true`, tracks requests for all resources. By default, only requests likely to be page views (e.g., HTML, or no specific extension) are tracked.                                                          |
 | `trackExtensions`   | `[see sources]` | `string[]` | A list of specific file extensions to track (e.g., `[".html", ".php"]`).                                                                                                                                     |
-| `ignoreUserAgents`  | `[]`            | `string[]` | A list of user-agent substrings. Requests with matching user-agents will be ignored (e.g., `["Googlebot", "Uptime-Kuma"]`). Matched with `strings.Contains`.                                                 |
+| `ignoreUserAgents`  | `[]`            | `string[]` | A list of user-agent substrings. Requests with matching user-agents will be ignored (e.g., `["Googlebot", "Uptime-Kuma"]`). Matching is done using `strings.Contains`.                                       |
 | `ignoreURLs`        | `[]`            | `string[]` | A list of regular expressions. Requests with URLs matching any of these patterns will be ignored (e.g., `["/health", "https?://[^/]+/health$"]`). Matched with `regexp.Compile.MatchString`.                 |
 | `ignoreIPs`         | `[]`            | `string[]` | A list of IP addresses or CIDR ranges to ignore (e.g., `["127.0.0.1", "10.0.0.1/16"]`). Matched with `netip.ParsePrefix.Contains`.                                                                           |
-| `headerIp`          | `X-Real-Ip`     | `string`   | The HTTP header to inspect for the client's real IP address, typically used when Traefik is behind another proxy.                                                                                            |
+| `headerIp`          | `X-Real-IP`     | `string`   | The HTTP header to inspect for the client's real IP address, typically used when Traefik is behind another proxy.                                                                                            |
 
 ## Contributing
 

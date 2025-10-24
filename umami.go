@@ -15,11 +15,13 @@ import (
 	"time"
 )
 
-// Config the plugin configuration.
+// Config defines the plugin configuration.
 type Config struct {
-	// Disabled disables the plugin.
+	// Enabled controls whether the plugin is enabled. Set to `false` to disable the plugin.
+	Enabled bool `json:"enabled"`
+	// Disabled disables the plugin. Deprecated: use Enabled instead.
 	Disabled bool `json:"disabled"`
-	// Debug enables debug logging, be prepared for flooding.
+	// Debug enables debug logging, be prepared for flooding, use for troubleshooting.
 	Debug bool `json:"debug"`
 	// QueueSize defines the size of queue, i.e. the amount of events that are waiting to be submitted to Umami.
 	QueueSize int `json:"queueSize"`
@@ -59,7 +61,7 @@ type Config struct {
 	IgnoreURLs []string `json:"ignoreURLs"`
 	// IgnoreIPs is a list of IPs or CIDRs to ignore.
 	IgnoreIPs []string `json:"ignoreIPs"`
-	// headerIp Header associated to real IP
+	// HeaderIp is the header name associated with the real IP address.
 	HeaderIp string `json:"headerIp"`
 }
 
@@ -67,6 +69,7 @@ type Config struct {
 func CreateConfig() *Config {
 	return &Config{
 		Disabled:     false,
+		Enabled:      true,
 		Debug:        false,
 		QueueSize:    1000,
 		BatchSize:    20,
@@ -88,7 +91,7 @@ func CreateConfig() *Config {
 		IgnoreUserAgents: []string{},
 		IgnoreURLs:       []string{},
 		IgnoreIPs:        []string{},
-		HeaderIp:         "X-Real-Ip",
+		HeaderIp:         "X-Real-IP",
 	}
 }
 
@@ -97,7 +100,7 @@ type UmamiFeeder struct {
 	next       http.Handler
 	name       string
 	isDebug    bool
-	isDisabled bool
+	isEnabled  bool
 	logHandler *log.Logger
 	queue      chan *UmamiEvent
 
@@ -121,14 +124,13 @@ type UmamiFeeder struct {
 	headerIp         string
 }
 
-// New created a new Demo plugin.
+// New creates a new UmamiFeeder plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	// construct
 	h := &UmamiFeeder{
 		next:       next,
 		name:       name,
 		isDebug:    config.Debug,
-		isDisabled: config.Disabled,
+		isEnabled:  config.Enabled && !config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
 		queue:        make(chan *UmamiEvent, config.QueueSize),
@@ -152,8 +154,8 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		headerIp:         config.HeaderIp,
 	}
 
-	if !h.isDisabled {
-		h.isDisabled = true
+	if h.isEnabled {
+		h.isEnabled = false // Disable until connection and config verification is done.
 		go h.retryConnection(ctx, config)
 	}
 
@@ -178,7 +180,7 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 		select {
 		case <-time.After(currentDelay):
 			retryAttempt++
-			h.debug("Attempting to connect to Umami (attempt #%d)...", retryAttempt)
+			h.debug("Attempting to connect to Umami (attempt #%d)", retryAttempt)
 
 			err := h.connect(ctx, config)
 			if err == nil {
@@ -187,13 +189,13 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 				err = h.verifyConfig(config)
 				if err == nil {
 					h.debug("Configuration verified. Enabling plugin and starting worker.")
-					h.isDisabled = false
+					h.isEnabled = true
 					go h.startWorker(ctx)
 					return // Successfully connected and configured, exit retry goroutine
 				}
 
-				h.error("configuration error, the plugin is disabled: " + err.Error())
-				h.isDisabled = true
+				h.error("Configuration error, the plugin is disabled: " + err.Error())
+				h.isEnabled = false
 				return // Exit retry goroutine, plugin remains disabled.
 			}
 
@@ -207,7 +209,7 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 
 func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 	if h.umamiHost == "" {
-		return fmt.Errorf("`umamiHost` is not set")
+		return fmt.Errorf("umamiHost is not set")
 	}
 
 	if config.UmamiUsername != "" && config.UmamiPassword != "" {
@@ -222,10 +224,10 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 		h.umamiToken = token
 	}
 	if h.umamiToken == "" && len(h.websites) == 0 {
-		return fmt.Errorf("either `umamiToken` or `websites` should be set")
+		return fmt.Errorf("either umamiToken or websites must be set")
 	}
 	if h.umamiToken == "" && h.createNewWebsites {
-		return fmt.Errorf("`umamiToken` is required to create new websites")
+		return fmt.Errorf("umamiToken is required to create new websites")
 	}
 
 	if h.umamiToken != "" {
@@ -278,7 +280,7 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 }
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if !h.isDisabled && h.shouldTrack(req) {
+	if h.isEnabled && h.shouldTrack(req) {
 		// If the resource should be reported, we wrap the response writer and check the status code before reporting
 		wrappedResponseWriter := &ResponseWriter{
 			ResponseWriter: rw,
