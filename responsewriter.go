@@ -7,9 +7,6 @@ import (
 	"net/http"
 )
 
-// Copied and adapted from https://github.com/safing/plausiblefeeder/blob/master/responsewriter.go
-// Licensed as MIT license
-
 // ResponseWriter is used to wrap given response writers.
 type ResponseWriter struct {
 	http.ResponseWriter
