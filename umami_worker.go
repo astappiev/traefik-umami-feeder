@@ -72,7 +72,7 @@ func (h *UmamiFeeder) startWorker(ctx context.Context) {
 	}
 }
 
-func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
+func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) error {
 	defer func() {
 		// Recover from panic.
 		panicVal := recover()
@@ -88,7 +88,7 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 		// Wait for event.
 		select {
 		case <-ctx.Done():
-			h.debug("worker shutting down (canceled)")
+			h.debugf("worker shutting down (canceled)")
 			if len(batch) > 0 {
 				h.reportEventsToUmami(ctx, batch)
 			}
@@ -113,7 +113,7 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) (err error) {
 }
 
 func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBody) {
-	h.debug("reporting %d events", len(events))
+	h.debugf("reporting %d events", len(events))
 	resp, err := sendRequest(ctx, h.umamiHost+"/api/batch", events, nil)
 	if err != nil {
 		h.error("failed to send tracking: " + err.Error())
@@ -121,7 +121,7 @@ func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBod
 	}
 	if h.isDebug {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		h.debug("%v: %s", resp.Status, string(bodyBytes))
+		h.debugf("%v: %s", resp.Status, string(bodyBytes))
 	}
 	defer func() {
 		_ = resp.Body.Close()

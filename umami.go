@@ -2,6 +2,7 @@ package traefik_umami_feeder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -162,6 +163,23 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	return h, nil
 }
 
+func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	if h.isEnabled && h.shouldTrack(req) {
+		// If the resource should be reported, we wrap the response writer and check the status code before reporting
+		wrappedResponseWriter := &ResponseWriter{
+			ResponseWriter: rw,
+			request:        req,
+			feeder:         h,
+		}
+
+		// Continue with next handler.
+		h.next.ServeHTTP(wrappedResponseWriter, req)
+		return
+	}
+
+	h.next.ServeHTTP(rw, req)
+}
+
 func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 	const maxRetryInterval = time.Hour
 	retryAttempt := 0
@@ -174,21 +192,21 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 		}
 
 		if retryAttempt > 0 { // Don't log for the immediate first attempt
-			h.debug("Next connection attempt in %v (attempt #%d).", currentDelay, retryAttempt+1)
+			h.debugf("Next connection attempt in %v (attempt #%d).", currentDelay, retryAttempt+1)
 		}
 
 		select {
 		case <-time.After(currentDelay):
 			retryAttempt++
-			h.debug("Attempting to connect to Umami (attempt #%d)", retryAttempt)
+			h.debugf("Attempting to connect to Umami (attempt #%d)", retryAttempt)
 
 			err := h.connect(ctx, config)
 			if err == nil {
-				h.debug("Successfully connected to Umami. Verifying configuration...")
+				h.debugf("Successfully connected to Umami. Verifying configuration...")
 
 				err = h.verifyConfig(config)
 				if err == nil {
-					h.debug("Configuration verified. Enabling plugin and starting worker.")
+					h.debugf("Configuration verified. Enabling plugin and starting worker.")
 					h.isEnabled = true
 					go h.startWorker(ctx)
 					return // Successfully connected and configured, exit retry goroutine
@@ -201,7 +219,7 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 
 			h.error("Failed to reconnect to Umami: " + err.Error())
 		case <-ctx.Done():
-			h.debug("Context cancelled during retryConnection, stopping connection retries.")
+			h.debugf("Context canceled during retryConnection, stopping connection retries.")
 			return
 		}
 	}
@@ -209,7 +227,7 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 
 func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 	if h.umamiHost == "" {
-		return fmt.Errorf("umamiHost is not set")
+		return errors.New("umamiHost is not set")
 	}
 
 	if config.UmamiUsername != "" && config.UmamiPassword != "" {
@@ -218,16 +236,16 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 			return fmt.Errorf("failed to get token: %w", err)
 		}
 		if token == "" {
-			return fmt.Errorf("retrieved token is empty")
+			return errors.New("retrieved token is empty")
 		}
-		h.debug("token received %s", token)
+		h.debugf("token received %s", token)
 		h.umamiToken = token
 	}
 	if h.umamiToken == "" && len(h.websites) == 0 {
-		return fmt.Errorf("either umamiToken or websites must be set")
+		return errors.New("either umamiToken or websites must be set")
 	}
 	if h.umamiToken == "" && h.createNewWebsites {
-		return fmt.Errorf("umamiToken is required to create new websites")
+		return errors.New("umamiToken is required to create new websites")
 	}
 
 	if h.umamiToken != "" {
@@ -243,7 +261,7 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 			}
 		}
 		h.websitesMutex.Unlock()
-		h.debug("websites fetched: %v", h.websites)
+		h.debugf("websites fetched: %v", h.websites)
 	}
 
 	return nil
@@ -251,14 +269,14 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 
 func (h *UmamiFeeder) verifyConfig(config *Config) error {
 	if len(config.IgnoreIPs) > 0 {
-		for _, ignoreIp := range config.IgnoreIPs {
-			network, err := netip.ParsePrefix(ignoreIp)
+		for _, ignoreIP := range config.IgnoreIPs {
+			network, err := netip.ParsePrefix(ignoreIP)
 			if err != nil {
-				network, err = netip.ParsePrefix(ignoreIp + "/32")
+				network, err = netip.ParsePrefix(ignoreIP + "/32")
 			}
 
 			if err != nil || !network.IsValid() {
-				return fmt.Errorf("invalid ignoreIp given %s: %w", ignoreIp, err)
+				return fmt.Errorf("invalid ignoreIP given %s: %w", ignoreIP, err)
 			}
 
 			h.ignorePrefixes = append(h.ignorePrefixes, network)
@@ -279,23 +297,6 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 	return nil
 }
 
-func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if h.isEnabled && h.shouldTrack(req) {
-		// If the resource should be reported, we wrap the response writer and check the status code before reporting
-		wrappedResponseWriter := &ResponseWriter{
-			ResponseWriter: rw,
-			request:        req,
-			feeder:         h,
-		}
-
-		// Continue with next handler.
-		h.next.ServeHTTP(wrappedResponseWriter, req)
-		return
-	}
-
-	h.next.ServeHTTP(rw, req)
-}
-
 func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 	if len(h.ignorePrefixes) > 0 {
 		requestIp := req.Header.Get(h.headerIp)
@@ -305,13 +306,13 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 
 		ip, err := netip.ParseAddr(requestIp)
 		if err != nil {
-			h.debug("invalid IP %s", requestIp)
+			h.debugf("invalid IP %s", requestIp)
 			return false
 		}
 
 		for _, prefix := range h.ignorePrefixes {
 			if prefix.Contains(ip) {
-				h.debug("ignoring IP %s", ip)
+				h.debugf("ignoring IP %s", ip)
 				return false
 			}
 		}
@@ -321,7 +322,7 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 		userAgent := req.UserAgent()
 		for _, disabledUserAgent := range h.ignoreUserAgents {
 			if strings.Contains(userAgent, disabledUserAgent) {
-				h.debug("ignoring user-agent %s", userAgent)
+				h.debugf("ignoring user-agent %s", userAgent)
 				return false
 			}
 		}
@@ -331,14 +332,14 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 		requestURL := req.URL.String()
 		for _, r := range h.ignoreRegexps {
 			if r.MatchString(requestURL) {
-				h.debug("ignoring location %s", requestURL)
+				h.debugf("ignoring location %s", requestURL)
 				return false
 			}
 		}
 	}
 
 	if !h.shouldTrackResource(req.URL.Path) {
-		h.debug("ignoring resource %s", req.URL.Path)
+		h.debugf("ignoring resource %s", req.URL.Path)
 		return false
 	}
 
@@ -354,7 +355,7 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 	}
 	h.websitesMutex.RUnlock()
 
-	h.debug("ignoring domain %s", hostname)
+	h.debugf("ignoring domain %s", hostname)
 	return false
 }
 
@@ -384,13 +385,13 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 	return false
 }
 
-func (h *UmamiFeeder) shouldTrackStatus(statusCode int) (report bool) {
+func (h *UmamiFeeder) shouldTrackStatus(statusCode int) bool {
 	if statusCode >= 400 {
 		if h.trackErrors {
 			return true
 		}
 
-		h.debug("not reporting %d error", statusCode)
+		h.debugf("not reporting %d error", statusCode)
 		return false
 	}
 	return true
@@ -404,7 +405,7 @@ func (h *UmamiFeeder) error(message string) {
 }
 
 // Arguments are handled in the manner of [fmt.Printf].
-func (h *UmamiFeeder) debug(format string, v ...any) {
+func (h *UmamiFeeder) debugf(format string, v ...any) {
 	if h.logHandler != nil && h.isDebug {
 		now := time.Now().Format("2006-01-02T15:04:05Z")
 		h.logHandler.Printf("%s DBG middlewareName=%s msg=\"%s\"", now, h.name, fmt.Sprintf(format, v...))

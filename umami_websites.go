@@ -22,8 +22,8 @@ type Website struct {
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 }
 
-func createWebsite(ctx context.Context, umamiHost string, umamiToken string, teamId string, websiteDomain string) (*Website, error) {
-	var headers = make(http.Header)
+func createWebsite(ctx context.Context, umamiHost, umamiToken, teamId, websiteDomain string) (*Website, error) {
+	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
 	var result Website
@@ -32,7 +32,6 @@ func createWebsite(ctx context.Context, umamiHost string, umamiToken string, tea
 		Domain: websiteDomain,
 		TeamId: teamId,
 	}, headers, &result)
-
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +39,8 @@ func createWebsite(ctx context.Context, umamiHost string, umamiToken string, tea
 	return &result, nil
 }
 
-func fetchWebsites(ctx context.Context, umamiHost string, umamiToken string, teamId string) (*[]Website, error) {
-	var headers = make(http.Header)
+func fetchWebsites(ctx context.Context, umamiHost, umamiToken, teamId string) (*[]Website, error) {
+	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+umamiToken)
 
 	url := umamiHost + "/api/websites?pageSize=200"
@@ -51,7 +50,6 @@ func fetchWebsites(ctx context.Context, umamiHost string, umamiToken string, tea
 
 	var result websitesResponse
 	err := sendRequestAndParse(ctx, url, nil, headers, &result)
-
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +85,6 @@ func getWebsiteId(h *UmamiFeeder, hostname string) string {
 	}
 
 	h.websites[website.Domain] = website.ID
-	h.debug("website created '%s': %s", website.Domain, website.ID)
+	h.debugf("website created '%s': %s", website.Domain, website.ID)
 	return website.ID
 }

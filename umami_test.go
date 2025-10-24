@@ -34,7 +34,7 @@ func TestTraefikUmamiFeeder(t *testing.T) {
 }
 
 func TestShouldTrackDefault(t *testing.T) {
-	feeder := UmamiFeeder{}
+	feeder := &UmamiFeeder{}
 
 	assertResource(t, feeder, true, "http://localhost")
 	assertResource(t, feeder, true, "http://localhost/about")
@@ -46,7 +46,8 @@ func TestShouldTrackDefault(t *testing.T) {
 	assertResource(t, feeder, false, "http://localhost/background.png")
 }
 
-func assertResource(t *testing.T, plugin UmamiFeeder, expected bool, url string) {
+func assertResource(t *testing.T, plugin *UmamiFeeder, expected bool, url string) {
+	t.Helper()
 	if expected != plugin.shouldTrackResource(url) {
 		t.Fatalf("expected %v for %s", expected, url)
 	}
@@ -64,40 +65,39 @@ func TestShouldTrackInvalidIp(t *testing.T) {
 }
 
 func TestShouldTrackIps(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true}
+	feeder := &UmamiFeeder{createNewWebsites: true}
 	err := feeder.verifyConfig(&Config{
 		IgnoreIPs: []string{"127.0.0.1", "10.0.0.1/24"},
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assertIgnoreIp(t, feeder, true, "192.168.0.1")
-	assertIgnoreIp(t, feeder, false, "127.0.0.1")
-	assertIgnoreIp(t, feeder, false, "10.0.0.1")
-	assertIgnoreIp(t, feeder, false, "10.0.0.255")
-	assertIgnoreIp(t, feeder, true, "10.0.1.1")
-	assertIgnoreIp(t, feeder, true, "10.10.10.1")
-	assertIgnoreIp(t, feeder, true, "1.1.1.1")
-	assertIgnoreIp(t, feeder, true, "8.8.8.8")
+	assertIgnoreIP(t, feeder, true, "192.168.0.1")
+	assertIgnoreIP(t, feeder, false, "127.0.0.1")
+	assertIgnoreIP(t, feeder, false, "10.0.0.1")
+	assertIgnoreIP(t, feeder, false, "10.0.0.255")
+	assertIgnoreIP(t, feeder, true, "10.0.1.1")
+	assertIgnoreIP(t, feeder, true, "10.10.10.1")
+	assertIgnoreIP(t, feeder, true, "1.1.1.1")
+	assertIgnoreIP(t, feeder, true, "8.8.8.8")
 }
 
-func assertIgnoreIp(t *testing.T, plugin UmamiFeeder, expected bool, clientIp string) {
+func assertIgnoreIP(t *testing.T, plugin *UmamiFeeder, expected bool, clientIP string) {
+	t.Helper()
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", nil)
-	req.Header.Set(plugin.headerIp, clientIp)
+	req.Header.Set(plugin.headerIp, clientIP)
 
 	if expected != plugin.shouldTrack(req) {
-		t.Fatalf("expected %v for %s", expected, clientIp)
+		t.Fatalf("expected %v for %s", expected, clientIP)
 	}
 }
 
 func TestShouldTrackUrls(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true}
+	feeder := &UmamiFeeder{createNewWebsites: true}
 	err := feeder.verifyConfig(&Config{
 		IgnoreURLs: []string{"https?://[^/]+/health$", "/about"},
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,8 @@ func TestShouldTrackUrls(t *testing.T) {
 	assertIgnoreUrl(t, feeder, true, "http://localhost/hello-world")
 }
 
-func assertIgnoreUrl(t *testing.T, plugin UmamiFeeder, expected bool, url string) {
+func assertIgnoreUrl(t *testing.T, plugin *UmamiFeeder, expected bool, url string) {
+	t.Helper()
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 
 	if expected != plugin.shouldTrack(req) {
@@ -121,7 +122,7 @@ func assertIgnoreUrl(t *testing.T, plugin UmamiFeeder, expected bool, url string
 }
 
 func TestShouldTrackUserAgents(t *testing.T) {
-	feeder := UmamiFeeder{createNewWebsites: true, ignoreUserAgents: []string{"Googlebot", "Uptime-Kuma"}}
+	feeder := &UmamiFeeder{createNewWebsites: true, ignoreUserAgents: []string{"Googlebot", "Uptime-Kuma"}}
 
 	assertIgnoreUa(t, feeder, true, "Mozilla/5.0 (Windows; Windows NT 6.0; WOW64) Gecko/20100101 Firefox/60.7")
 	assertIgnoreUa(t, feeder, true, "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 10.0; Win64; x64 Trident/6.0)")
@@ -133,7 +134,8 @@ func TestShouldTrackUserAgents(t *testing.T) {
 	assertIgnoreUa(t, feeder, false, "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/W.X.Y.Z Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
 }
 
-func assertIgnoreUa(t *testing.T, plugin UmamiFeeder, expected bool, ua string) {
+func assertIgnoreUa(t *testing.T, plugin *UmamiFeeder, expected bool, ua string) {
+	t.Helper()
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost/", nil)
 	req.Header.Set("User-Agent", ua)
 

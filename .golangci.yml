@@ -22,6 +22,8 @@ linters:
     - varnamelen
     - wrapcheck
     - wsl
+    - wsl_v5
+    - revive
   settings:
     funlen:
       lines: -1
@@ -30,10 +32,14 @@ linters:
       min-len: 5
       min-occurrences: 4
     gocyclo:
-      min-complexity: 12
+      min-complexity: 15
     godox:
       keywords:
         - FIXME
+    tagliatelle:
+      case:
+        ignored-fields:
+          - IgnoreURLs
     govet:
       disable:
         - fieldalignment

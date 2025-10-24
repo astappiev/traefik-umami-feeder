@@ -18,9 +18,9 @@ func sendRequest(ctx context.Context, url string, body interface{}, headers http
 	var err error
 
 	if body != nil {
-		bodyJson, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
+		bodyJson, err2 := json.Marshal(body)
+		if err2 != nil {
+			return nil, err2
 		}
 
 		req, err = http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyJson))
@@ -54,7 +54,7 @@ func sendRequest(ctx context.Context, url string, body interface{}, headers http
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("request failed with status %d (failed to read body: %v)", status, err)
+			return nil, fmt.Errorf("request failed with status %d (failed to read body: %w)", status, err)
 		}
 		return nil, fmt.Errorf("request failed with status %d (%v)", status, string(respBody))
 	}
@@ -89,9 +89,7 @@ func parseDomainFromHost(host string) string {
 	if strings.Contains(host, ":") {
 		host = strings.Split(host, ":")[0]
 	}
-	if strings.HasSuffix(host, ".") {
-		host = strings.TrimSuffix(host, ".")
-	}
+	host = strings.TrimSuffix(host, ".")
 	return strings.ToLower(host)
 }
 
@@ -108,11 +106,11 @@ func parseAcceptLanguage(acceptLanguage string) string {
 }
 
 func extractRemoteIP(req *http.Request) string {
-	if ip := req.Header.Get("CF-Connecting-IP"); ip != "" {
+	if ip := req.Header.Get("Cf-Connecting-Ip"); ip != "" {
 		return ip
 	}
 
-	if ip := req.Header.Get("x-vercel-ip"); ip != "" {
+	if ip := req.Header.Get("X-Vercel-Ip"); ip != "" {
 		return ip
 	}
 
