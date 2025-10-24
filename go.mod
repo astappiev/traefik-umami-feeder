@@ -1,3 +1,3 @@
 module github.com/astappiev/traefik-umami-feeder
 
-go 1.21
+go 1.22

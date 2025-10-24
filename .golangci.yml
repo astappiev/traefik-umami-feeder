@@ -1,75 +1,73 @@
-run:
-  timeout: 3m
-  skip-files: []
-  skip-dirs: []
-
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  golint:
-    min-confidence: 0
-  gocyclo:
-    min-complexity: 12
-  goconst:
-    min-len: 5
-    min-occurrences: 4
-  misspell:
-    locale: US
-  funlen:
-    lines: -1
-    statements: 50
-  godox:
-    keywords:
-      - FIXME
-  gofumpt:
-    extra-rules: true
+version: "2"
 
 linters:
-  enable-all: true
+  default: all
   disable:
-    - deadcode # deprecated
-    - exhaustivestruct # deprecated
-    - golint # deprecated
-    - ifshort # deprecated
-    - interfacer # deprecated
-    - maligned # deprecated
-    - nosnakecase # deprecated
-    - scopelint # deprecated
-    - scopelint # deprecated
-    - structcheck # deprecated
-    - varcheck # deprecated
-    - sqlclosecheck # not relevant (SQL)
-    - rowserrcheck # not relevant (SQL)
-    - execinquery # not relevant (SQL)
-    - cyclop # duplicate of gocyclo
-    - bodyclose # Too many false positives: https://github.com/timakin/bodyclose/issues/30
+    - bodyclose
+    - cyclop
     - dupl
-    - testpackage
-    - tparallel
-    - paralleltest
-    - nlreturn
-    - wsl
+    - err113
     - exhaustive
     - exhaustruct
-    - goerr113
-    - wrapcheck
-    - ifshort
-    - noctx
-    - lll
-    - gomnd
     - forbidigo
+    - lll
+    - mnd
+    - nlreturn
+    - noctx
+    - paralleltest
+    - rowserrcheck
+    - sqlclosecheck
+    - testpackage
+    - tparallel
     - varnamelen
+    - wrapcheck
+    - wsl
+  settings:
+    funlen:
+      lines: -1
+      statements: 50
+    goconst:
+      min-len: 5
+      min-occurrences: 4
+    gocyclo:
+      min-complexity: 12
+    godox:
+      keywords:
+        - FIXME
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - funlen
+          - goconst
+          - godot
+        path: (.+)_test.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 
 issues:
-  exclude-use-default: false
-  max-per-linter: 0
   max-same-issues: 0
-  exclude: []
-  exclude-rules:
-    - path: (.+)_test.go
-      linters:
-        - goconst
-        - funlen
-        - godot
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

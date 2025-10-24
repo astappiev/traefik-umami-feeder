@@ -2,71 +2,45 @@ name: Main
 
 on:
   push:
-    branches:
-      - main
   pull_request:
 
+env:
+  GO_VERSION: 1.22
+  YAEGI_VERSION: v0.16.1
+  CGO_ENABLED: 0
+
 jobs:
-
   main:
-    name: Main Process
+    permissions:
+      contents: read
+      pull-requests: read
+
     runs-on: ubuntu-latest
-    env:
-      GO_VERSION: 1.21
-      GOLANGCI_LINT_VERSION: v2.5.0
-      YAEGI_VERSION: v0.16.1
-      CGO_ENABLED: 0
-    defaults:
-      run:
-        working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}
-
     steps:
-
-      # https://github.com/marketplace/actions/setup-go-environment
-      - name: Set up Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v2
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      # https://github.com/marketplace/actions/checkout
       - name: Check out code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v5
         with:
-          path: go/src/github.com/${{ github.repository }}
           fetch-depth: 0
 
-      # https://github.com/marketplace/actions/cache
-      - name: Cache Go modules
-        uses: actions/cache@v3
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v6
         with:
-          path: ${{ github.workspace }}/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      # https://golangci-lint.run/usage/install#other-ci
-      - name: Install golangci-lint ${{ env.GOLANGCI_LINT_VERSION }}
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin ${GOLANGCI_LINT_VERSION}
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install Yaegi ${{ env.YAEGI_VERSION }}
         run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
 
-      - name: Setup GOPATH
-        run: go env -w GOPATH=${{ github.workspace }}/go
-
       - name: Check and get dependencies
         run: |
           go mod tidy
-          git diff --exit-code go.mod
-          # git diff --exit-code go.sum
-          go mod download
           go mod vendor
-          # git diff --exit-code ./vendor/
+          git diff --exit-code
 
-      - name: Lint and Tests
-        run: make
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+
+      - name: Run tests
+        run: go test -v -cover ./...
 
       - name: Run tests with Yaegi
-        run: make yaegi_test
-        env:
-          GOPATH: ${{ github.workspace }}/go
+        run: yaegi test -v .
