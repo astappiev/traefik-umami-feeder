@@ -16,13 +16,13 @@ type ResponseWriter struct {
 }
 
 // WriteHeader adds custom handling to the wrapped WriterHeader method.
-func (rw *ResponseWriter) WriteHeader(code int) {
-	if rw.feeder.shouldTrackStatus(code) {
-		rw.feeder.submitToFeed(rw.request, code)
+func (rw *ResponseWriter) WriteHeader(statusCode int) {
+	if rw.feeder.shouldTrackStatus(statusCode) {
+		rw.feeder.submitToFeed(rw.request, statusCode)
 	}
 
 	// Continue with the original method.
-	rw.ResponseWriter.WriteHeader(code)
+	rw.ResponseWriter.WriteHeader(statusCode)
 }
 
 func (rw *ResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
