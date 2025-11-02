@@ -28,7 +28,7 @@ experimental:
   plugins:
     umami-feeder:
       moduleName: github.com/astappiev/traefik-umami-feeder
-      version: v1.3.0 # Replace with the latest version
+      version: v1.4.0 # Replace with the latest version
 ```
 
 ### Step 2. Configure the middleware
