@@ -36,7 +36,7 @@ jobs:
           go mod vendor
           git diff --exit-code
 
-      - name: golangci-lint
+      - name: Lint code
         uses: golangci/golangci-lint-action@v8
 
       - name: Run tests

@@ -18,9 +18,9 @@ type UmamiEvent struct {
 	UserAgent string         `json:"userAgent,omitempty"` // User agent
 	Timestamp int64          `json:"timestamp,omitempty"` // UNIX timestamp in seconds
 	Data      map[string]any `json:"data,omitempty"`      // Additional data for the event
-	//Name      string         `json:"name,omitempty"`      // Event name (for custom events)
-	//Screen    string         `json:"screen,omitempty"`    // Screen resolution (ex. "1920x1080")
-	//Title     string         `json:"title,omitempty"`     // Page title
+	// Name      string         `json:"name,omitempty"`      // Event name (for custom events)
+	// Screen    string         `json:"screen,omitempty"`    // Screen resolution (ex. "1920x1080")
+	// Title     string         `json:"title,omitempty"`     // Page title
 }
 
 type SendBody struct {
