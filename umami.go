@@ -166,14 +166,14 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if h.isEnabled && h.shouldTrack(req) {
 		// If the resource should be reported, we wrap the response writer and check the status code before reporting
-		wrappedResponseWriter := &ResponseWriter{
+		responseWrapper := &ResponseWrapper{
 			ResponseWriter: rw,
 			request:        req,
 			feeder:         h,
 		}
 
 		// Continue with next handler.
-		h.next.ServeHTTP(wrappedResponseWriter, req)
+		h.next.ServeHTTP(responseWrapper, req)
 		return
 	}
 
