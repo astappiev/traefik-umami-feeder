@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func sendRequest(ctx context.Context, url string, body interface{}, headers http.Header) (*http.Response, error) {
+func sendRequest(ctx context.Context, url string, body any, headers http.Header) (*http.Response, error) {
 	var req *http.Request
 	var err error
 
@@ -62,7 +62,7 @@ func sendRequest(ctx context.Context, url string, body interface{}, headers http
 	return resp, nil
 }
 
-func sendRequestAndParse(ctx context.Context, url string, body interface{}, headers http.Header, value interface{}) error {
+func sendRequestAndParse(ctx context.Context, url string, body any, headers http.Header, value any) error {
 	resp, err := sendRequest(ctx, url, body, headers)
 	if err != nil {
 		return err

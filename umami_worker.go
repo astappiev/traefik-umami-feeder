@@ -9,18 +9,18 @@ import (
 )
 
 type UmamiEvent struct {
-	Website   string                 `json:"website"`             // Website ID
-	Hostname  string                 `json:"hostname"`            // Name of host
-	Language  string                 `json:"language,omitempty"`  // Language of visitor (ex. "en-US")
-	Referrer  string                 `json:"referrer,omitempty"`  // Referrer URL
-	Url       string                 `json:"url"`                 // Page URL
-	Ip        string                 `json:"ip,omitempty"`        // IP address
-	UserAgent string                 `json:"userAgent,omitempty"` // User agent
-	Timestamp int64                  `json:"timestamp,omitempty"` // UNIX timestamp in seconds
-	Data      map[string]interface{} `json:"data,omitempty"`      // Additional data for the event
-	// Name     string                 `json:"name,omitempty"`   // Event name (for custom events)
-	// Screen   string                 `json:"screen,omitempty"` // Screen resolution (ex. "1920x1080")
-	// Title    string                 `json:"title,omitempty"`  // Page title
+	Website   string         `json:"website"`             // Website ID
+	Hostname  string         `json:"hostname"`            // Name of host
+	Language  string         `json:"language,omitempty"`  // Language of visitor (ex. "en-US")
+	Referrer  string         `json:"referrer,omitempty"`  // Referrer URL
+	Url       string         `json:"url"`                 // Page URL
+	Ip        string         `json:"ip,omitempty"`        // IP address
+	UserAgent string         `json:"userAgent,omitempty"` // User agent
+	Timestamp int64          `json:"timestamp,omitempty"` // UNIX timestamp in seconds
+	Data      map[string]any `json:"data,omitempty"`      // Additional data for the event
+	//Name      string         `json:"name,omitempty"`      // Event name (for custom events)
+	//Screen    string         `json:"screen,omitempty"`    // Screen resolution (ex. "1920x1080")
+	//Title     string         `json:"title,omitempty"`     // Page title
 }
 
 type SendBody struct {
@@ -49,7 +49,7 @@ func (h *UmamiFeeder) submitToFeed(req *http.Request, statusCode int) {
 	}
 
 	if statusCode >= 400 {
-		event.Data = map[string]interface{}{
+		event.Data = map[string]any{
 			"status_code": statusCode,
 		}
 	}

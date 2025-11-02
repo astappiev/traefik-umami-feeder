@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -368,12 +369,7 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 
 	// If a custom file extension list is defined, check if the resource matches it. If not, do not report.
 	if len(h.trackExtensions) > 0 {
-		for _, suffix := range h.trackExtensions {
-			if suffix == pathExt {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(h.trackExtensions, pathExt)
 	}
 
 	// Check if the suffix is regarded to be "content".
