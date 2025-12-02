@@ -59,8 +59,10 @@ type Config struct {
 
 	// IgnoreUserAgents is a list of user agents to ignore.
 	IgnoreUserAgents []string `json:"ignoreUserAgents"`
-	// IgnoreURLs is a list of request urls to ignore, each string is converted to RegExp and urls matched against it.
+	// IgnoreURLs is a list of request urls to ignore, each string is converted to RegExp and paths matched against it.
 	IgnoreURLs []string `json:"ignoreURLs"`
+	// IgnoreHosts is a list of hosts to ignore.
+	IgnoreHosts []string `json:"ignoreHosts"`
 	// IgnoreIPs is a list of IPs or CIDRs to ignore.
 	IgnoreIPs []string `json:"ignoreIPs"`
 	// HeaderIp is the header name associated with the real IP address.
@@ -92,6 +94,7 @@ func CreateConfig() *Config {
 
 		IgnoreUserAgents: []string{},
 		IgnoreURLs:       []string{},
+		IgnoreHosts:      []string{},
 		IgnoreIPs:        []string{},
 		HeaderIp:         "X-Real-IP",
 	}
@@ -120,6 +123,7 @@ type UmamiFeeder struct {
 	trackAllResources bool
 	trackExtensions   []string
 
+	ignoreHosts      []string
 	ignoreUserAgents []string
 	ignoreRegexps    []regexp.Regexp
 	ignorePrefixes   []netip.Prefix
@@ -150,6 +154,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		trackAllResources: config.TrackAllResources,
 		trackExtensions:   config.TrackExtensions,
 
+		ignoreHosts:      config.IgnoreHosts,
 		ignoreUserAgents: config.IgnoreUserAgents,
 		ignoreRegexps:    []regexp.Regexp{},
 		ignorePrefixes:   []netip.Prefix{},
@@ -299,6 +304,15 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 }
 
 func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
+	if len(h.ignoreHosts) > 0 {
+		for _, disabledHost := range h.ignoreHosts {
+			if strings.EqualFold(req.Host, disabledHost) {
+				h.debugf("ignoring host %s", req.Host)
+				return false
+			}
+		}
+	}
+
 	if len(h.ignorePrefixes) > 0 {
 		requestIp := req.Header.Get(h.headerIp)
 		if requestIp == "" {

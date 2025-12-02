@@ -93,23 +93,32 @@ func assertIgnoreIP(t *testing.T, plugin *UmamiFeeder, expected bool, clientIP s
 	}
 }
 
+func TestShouldTrackHosts(t *testing.T) {
+	feeder := &UmamiFeeder{createNewWebsites: true, ignoreHosts: []string{"localhost", "internal.example.com"}}
+
+	assertIgnoreUrl(t, feeder, false, "http://localhost/about")
+	assertIgnoreUrl(t, feeder, false, "http://LOCALHOST/about")
+	assertIgnoreUrl(t, feeder, true, "https://about.localhost/")
+	assertIgnoreUrl(t, feeder, false, "https://internal.example.com/welcome")
+	assertIgnoreUrl(t, feeder, true, "https://EXAMPLE.COM")
+}
+
 func TestShouldTrackUrls(t *testing.T) {
 	feeder := &UmamiFeeder{createNewWebsites: true}
 	err := feeder.verifyConfig(&Config{
-		IgnoreURLs: []string{"https?://[^/]+/health$", "/about"},
+		IgnoreURLs: []string{"/about", "^/admin", "world$"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assertIgnoreUrl(t, feeder, false, "http://localhost/health")
-	assertIgnoreUrl(t, feeder, true, "http://localhost/user/health")
-	assertIgnoreUrl(t, feeder, true, "http://localhost/healthcheck")
-	assertIgnoreUrl(t, feeder, true, "http://localhost/")
-	assertIgnoreUrl(t, feeder, false, "http://localhost/about")
-	assertIgnoreUrl(t, feeder, false, "http://localhost/aboutus")
-	assertIgnoreUrl(t, feeder, false, "http://localhost/category/about")
-	assertIgnoreUrl(t, feeder, true, "http://localhost/hello-world")
+	assertIgnoreUrl(t, feeder, true, "/")
+	assertIgnoreUrl(t, feeder, false, "/about")
+	assertIgnoreUrl(t, feeder, false, "/aboutus")
+	assertIgnoreUrl(t, feeder, false, "/category/about")
+	assertIgnoreUrl(t, feeder, true, "/world/news")
+	assertIgnoreUrl(t, feeder, false, "/hello-world")
+	assertIgnoreUrl(t, feeder, false, "/admin/secret")
 }
 
 func assertIgnoreUrl(t *testing.T, plugin *UmamiFeeder, expected bool, url string) {
