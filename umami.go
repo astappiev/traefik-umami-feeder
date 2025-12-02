@@ -303,7 +303,7 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 	return nil
 }
 
-func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
+func (h *UmamiFeeder) shouldTrackRequest(req *http.Request) bool {
 	if len(h.ignoreHosts) > 0 {
 		for _, disabledHost := range h.ignoreHosts {
 			if strings.EqualFold(req.Host, disabledHost) {
@@ -351,6 +351,14 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 				return false
 			}
 		}
+	}
+
+	return true
+}
+
+func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
+	if !h.shouldTrackRequest(req) {
+		return false
 	}
 
 	if !h.shouldTrackResource(req.URL.Path) {

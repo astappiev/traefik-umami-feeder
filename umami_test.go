@@ -88,7 +88,7 @@ func assertIgnoreIP(t *testing.T, plugin *UmamiFeeder, expected bool, clientIP s
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost", nil)
 	req.Header.Set(plugin.headerIp, clientIP)
 
-	if expected != plugin.shouldTrack(req) {
+	if expected != plugin.shouldTrackRequest(req) {
 		t.Fatalf("expected %v for %s", expected, clientIP)
 	}
 }
@@ -125,7 +125,7 @@ func assertIgnoreUrl(t *testing.T, plugin *UmamiFeeder, expected bool, url strin
 	t.Helper()
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 
-	if expected != plugin.shouldTrack(req) {
+	if expected != plugin.shouldTrackRequest(req) {
 		t.Fatalf("expected %v for %s", expected, url)
 	}
 }
@@ -148,7 +148,7 @@ func assertIgnoreUa(t *testing.T, plugin *UmamiFeeder, expected bool, ua string)
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://localhost/", nil)
 	req.Header.Set("User-Agent", ua)
 
-	if expected != plugin.shouldTrack(req) {
+	if expected != plugin.shouldTrackRequest(req) {
 		t.Fatalf("expected %v for %s", expected, ua)
 	}
 }
