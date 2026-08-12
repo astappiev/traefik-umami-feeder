@@ -1,3 +1,5 @@
+
+
 # Traefik Umami Feeder Plugin
 
 A [Traefik](https://traefik.io/traefik/) middleware plugin that sends visits to your [Umami](https://umami.is) instance.
@@ -111,6 +113,7 @@ entryPoints:
 | `enabled`           | `true`          | `bool`     | Set to `false` to disable the plugin.                                                                                                                                                                        |
 | `debug`             | `false`         | `bool`     | Set to `true` for verbose logging. Useful for troubleshooting as plugins don't inherit Traefik's global log level.                                                                                           |
 | `queueSize`         | `1000`          | `int`      | Maximum number of tracking events to queue before sending to the Umami server.                                                                                                                               |
+| `batchSize`         | `20`            | `int`      | Number of events to batch together before sending a single request to the Umami instance.                                                                                                                    |
 | `umamiHost`         | **required**    | `string`   | URL of your Umami instance, reachable from Traefik (e.g., `http://umami:3000`).                                                                                                                              |
 | `umamiToken`        | -               | `string`   | [Umami API Token](https://umami.is/docs/api/authentication) for authenticating with your Umami instance. Use this *or* `umamiUsername`/`umamiPassword`. Required for automatic website fetching or creation. |
 | `umamiUsername`     | -               | `string`   | Username for Umami authentication. Use this with `umamiPassword` if not using `umamiToken`. Required for automatic website fetching or creation.                                                             |
