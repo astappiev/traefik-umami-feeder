@@ -128,8 +128,8 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) error {
 			h.isEnabled.Store(false)
 			// Best effort, queued events are dropped.
 			if len(batch) > 0 {
-				// The worker ctx is canceled, so use a fresh one.
-				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				// The worker ctx is canceled, so detach from its cancellation.
+				sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 				h.reportEventsToUmami(sendCtx, batch)
 				cancel()
 			}

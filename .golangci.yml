@@ -6,14 +6,20 @@ linters:
     - bodyclose
     - cyclop
     - dupl
+    - embeddedstructfieldcheck
     - err113
     - exhaustive
     - exhaustruct
+    - exhaustruct_v5
     - forbidigo
+    - gochecknoglobals
+    - gomodguard
+    - intrange # range-over-int is not supported by Yaegi
     - lll
     - mnd
     - nlreturn
     - noctx
+    - noinlineerr
     - paralleltest
     - rowserrcheck
     - sqlclosecheck
@@ -46,6 +52,9 @@ linters:
       enable-all: true
     misspell:
       locale: US
+    modernize:
+      disable:
+        - rangeint # range-over-int is not supported by Yaegi
   exclusions:
     generated: lax
     rules:
@@ -70,7 +79,9 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
   exclusions:
     generated: lax
     paths:

@@ -370,7 +370,11 @@ func TestNewNormalizesWebsites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if websiteId := lookupWebsiteId(handler.(*UmamiFeeder), "example.com"); websiteId != "id" {
+	feeder, ok := handler.(*UmamiFeeder)
+	if !ok {
+		t.Fatal("expected *UmamiFeeder")
+	}
+	if websiteId := lookupWebsiteId(feeder, "example.com"); websiteId != "id" {
 		t.Fatalf("expected normalized website, got %q", websiteId)
 	}
 }

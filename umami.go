@@ -298,89 +298,104 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 	return nil
 }
 
-func (h *UmamiFeeder) verifyConfig(config *Config) error {
-	if len(config.IgnoreIPs) > 0 {
-		for _, ignoreIP := range config.IgnoreIPs {
-			network, err := netip.ParsePrefix(ignoreIP)
-			if err != nil {
-				// A single address, use a full-length prefix (/32 or /128).
-				// ParseAddr rejects an "ip:port" typo like "192.168.1.0:24".
-				var addr netip.Addr
-				addr, err = netip.ParseAddr(ignoreIP)
-				if err == nil {
-					addr = addr.Unmap()
-					network = netip.PrefixFrom(addr, addr.BitLen())
-				}
-			} else if network.Addr().Is4In6() && network.Bits() >= 96 {
-				// Request IPs are unmapped, so mapped prefixes (e.g. "::ffff:10.0.0.0/104") must be too.
-				network = netip.PrefixFrom(network.Addr().Unmap(), network.Bits()-96)
-			}
-
-			if err != nil || !network.IsValid() {
-				return fmt.Errorf("invalid ignoreIP given %s: %w", ignoreIP, err)
-			}
-
-			h.ignorePrefixes = append(h.ignorePrefixes, network)
+func parseIgnoreIP(ignoreIP string) (netip.Prefix, error) {
+	network, err := netip.ParsePrefix(ignoreIP)
+	if err == nil {
+		if network.Addr().Is4In6() && network.Bits() >= 96 {
+			// Request IPs are unmapped, so mapped prefixes (e.g. "::ffff:10.0.0.0/104") must be too.
+			network = netip.PrefixFrom(network.Addr().Unmap(), network.Bits()-96)
 		}
+		return network, nil
 	}
 
-	if len(config.IgnoreURLs) > 0 {
-		for _, location := range config.IgnoreURLs {
-			r, err := regexp.Compile(location)
-			if err != nil {
-				return fmt.Errorf("failed to compile ignoreURL %s: %w", location, err)
-			}
+	// A single address, use a full-length prefix (/32 or /128).
+	// ParseAddr rejects an "ip:port" typo like "192.168.1.0:24".
+	addr, err := netip.ParseAddr(ignoreIP)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	addr = addr.Unmap()
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
+}
 
-			h.ignoreRegexps = append(h.ignoreRegexps, *r)
+func (h *UmamiFeeder) verifyConfig(config *Config) error {
+	for _, ignoreIP := range config.IgnoreIPs {
+		network, err := parseIgnoreIP(ignoreIP)
+		if err != nil {
+			return fmt.Errorf("invalid ignoreIP given %s: %w", ignoreIP, err)
 		}
+
+		h.ignorePrefixes = append(h.ignorePrefixes, network)
+	}
+
+	for _, location := range config.IgnoreURLs {
+		r, err := regexp.Compile(location)
+		if err != nil {
+			return fmt.Errorf("failed to compile ignoreURL %s: %w", location, err)
+		}
+
+		h.ignoreRegexps = append(h.ignoreRegexps, *r)
 	}
 
 	return nil
 }
 
-// shouldTrackRequest applies the ignore rules, hostname is the normalized req.Host.
-func (h *UmamiFeeder) shouldTrackRequest(req *http.Request, hostname string) bool {
-	if len(h.ignoreHosts) > 0 {
-		// Entries without a port match any port.
-		if _, ok := h.ignoreHosts[hostname]; ok {
-			h.debugf("ignoring host %s", hostname)
-			return false
-		}
-		// Entries with a port match only that port, keyed like normalizeHostPort.
-		if i := strings.LastIndexByte(req.Host, ':'); i >= 0 {
-			if _, ok := h.ignoreHosts[net.JoinHostPort(hostname, req.Host[i+1:])]; ok {
-				h.debugf("ignoring host %s", req.Host)
-				return false
-			}
+func (h *UmamiFeeder) shouldIgnoreHost(req *http.Request, hostname string) bool {
+	// Entries without a port match any port.
+	if _, ok := h.ignoreHosts[hostname]; ok {
+		h.debugf("ignoring host %s", hostname)
+		return true
+	}
+
+	// Entries with a port match only that port, keyed like normalizeHostPort.
+	if i := strings.LastIndexByte(req.Host, ':'); i >= 0 {
+		if _, ok := h.ignoreHosts[net.JoinHostPort(hostname, req.Host[i+1:])]; ok {
+			h.debugf("ignoring host %s", req.Host)
+			return true
 		}
 	}
 
-	if len(h.ignorePrefixes) > 0 {
-		requestIp := req.Header.Get(h.headerIp)
-		if requestIp == "" {
-			requestIp = req.RemoteAddr
-		}
+	return false
+}
 
-		// Inlined, as each call allocates under Yaegi. Bare IPs (e.g. X-Real-IP) are most common, so try them first.
-		ip, err := netip.ParseAddr(requestIp)
-		if err != nil {
-			var addrPort netip.AddrPort
-			addrPort, err = netip.ParseAddrPort(requestIp)
-			ip = addrPort.Addr()
-		}
-		if err != nil {
-			h.debugf("invalid IP %s", requestIp)
-			return false
-		}
+func (h *UmamiFeeder) shouldIgnoreIP(req *http.Request) bool {
+	requestIp := req.Header.Get(h.headerIp)
+	if requestIp == "" {
+		requestIp = req.RemoteAddr
+	}
 
-		// Unmap "::ffff:10.0.0.5" so it matches IPv4 prefixes.
-		ip = ip.Unmap()
-		for _, prefix := range h.ignorePrefixes {
-			if prefix.Contains(ip) {
-				h.debugf("ignoring IP %s", ip)
-				return false
-			}
+	// Inlined, as each call allocates under Yaegi. Bare IPs (e.g. X-Real-IP) are most common, so try them first.
+	ip, err := netip.ParseAddr(requestIp)
+	if err != nil {
+		var addrPort netip.AddrPort
+		addrPort, err = netip.ParseAddrPort(requestIp)
+		ip = addrPort.Addr()
+	}
+	if err != nil {
+		h.debugf("ignoring invalid IP %s", requestIp)
+		return true
+	}
+
+	// Unmap "::ffff:10.0.0.5" so it matches IPv4 prefixes.
+	ip = ip.Unmap()
+	for _, prefix := range h.ignorePrefixes {
+		if prefix.Contains(ip) {
+			h.debugf("ignoring IP %s", ip)
+			return true
 		}
+	}
+
+	return false
+}
+
+// shouldTrackRequest applies the ignore rules, hostname is the normalized req.Host.
+func (h *UmamiFeeder) shouldTrackRequest(req *http.Request, hostname string) bool {
+	if len(h.ignoreHosts) > 0 && h.shouldIgnoreHost(req, hostname) {
+		return false
+	}
+
+	if len(h.ignorePrefixes) > 0 && h.shouldIgnoreIP(req) {
+		return false
 	}
 
 	if len(h.ignoreUserAgents) > 0 {
