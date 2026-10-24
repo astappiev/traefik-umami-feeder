@@ -11,9 +11,11 @@ import (
 type ResponseWrapper struct {
 	http.ResponseWriter
 
-	request *http.Request
-	feeder  *UmamiFeeder
-	written bool // Track if WriteHeader was called
+	request   *http.Request
+	hostname  string
+	websiteId string
+	feeder    *UmamiFeeder
+	written   bool // Track if WriteHeader was called
 }
 
 // WriteHeader intercepts the status code and submits the request to the Umami feeder if needed.
@@ -22,10 +24,11 @@ func (rw *ResponseWrapper) WriteHeader(statusCode int) {
 	if rw.written {
 		return // Prevent multiple calls
 	}
+
 	rw.written = true
 
 	if rw.feeder.shouldTrackStatus(statusCode) {
-		rw.feeder.submitToFeed(rw.request, statusCode)
+		rw.feeder.submitToFeed(rw.request, rw.hostname, rw.websiteId, statusCode)
 	}
 
 	// Continue with the original method.

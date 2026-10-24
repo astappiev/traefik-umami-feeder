@@ -2,6 +2,7 @@ package traefik_umami_feeder
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -35,6 +36,10 @@ func createWebsite(ctx context.Context, umamiHost, umamiToken, teamId, websiteDo
 	if err != nil {
 		return nil, err
 	}
+	if result.ID == "" {
+		// lookupWebsiteId never finds an empty id, so a website would be created per event.
+		return nil, errors.New("response has no website id")
+	}
 
 	return &result, nil
 }
@@ -57,34 +62,48 @@ func fetchWebsites(ctx context.Context, umamiHost, umamiToken, teamId string) (*
 	return &result.Data, nil
 }
 
-func getWebsiteId(h *UmamiFeeder, hostname string) string {
+// lookupWebsiteId returns the websiteId for the hostname, or "" if unknown.
+func lookupWebsiteId(h *UmamiFeeder, hostname string) string {
 	h.websitesMutex.RLock()
-	websiteId, ok := h.websites[hostname]
+	websiteId := h.websites[hostname]
 	h.websitesMutex.RUnlock()
+	return websiteId
+}
 
-	if ok {
+// failedWebsiteRetryInterval is how long a failed website creation isn't retried.
+const failedWebsiteRetryInterval = 10 * time.Minute
+
+// resolveWebsiteId returns the websiteId for the hostname, creating the website if needed.
+// Creation is serialized by createMutex, failures aren't retried for failedWebsiteRetryInterval.
+func resolveWebsiteId(ctx context.Context, h *UmamiFeeder, hostname string) string {
+	h.createMutex.Lock()
+	defer h.createMutex.Unlock()
+
+	// It may have been created since the event was queued.
+	if websiteId := lookupWebsiteId(h, hostname); websiteId != "" {
 		return websiteId
 	}
 
-	h.websitesMutex.Lock()
-	defer h.websitesMutex.Unlock()
-
-	// Double-check after acquiring write lock to prevent race condition
-	if websiteId, ok := h.websites[hostname]; ok {
-		return websiteId
+	if failedAt, ok := h.failedWebsites[hostname]; ok && time.Since(failedAt) < failedWebsiteRetryInterval {
+		return ""
 	}
 
-	// Create a background context for the API call
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// websitesMutex isn't held during the API call, so requests aren't blocked.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	website, err := createWebsite(ctx, h.umamiHost, h.umamiToken, h.umamiTeamId, hostname)
 	if err != nil {
-		h.error("failed to create website: " + err.Error())
+		h.failedWebsites[hostname] = time.Now()
+		h.error("failed to create website " + hostname + ": " + err.Error())
 		return ""
 	}
+	delete(h.failedWebsites, hostname)
 
-	h.websites[website.Domain] = website.ID
+	h.websitesMutex.Lock()
+	h.websites[hostname] = website.ID
+	h.websitesMutex.Unlock()
+
 	h.debugf("website created '%s': %s", website.Domain, website.ID)
 	return website.ID
 }

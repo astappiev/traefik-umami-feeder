@@ -2,9 +2,12 @@ package traefik_umami_feeder
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestTraefikUmamiFeeder(t *testing.T) {
@@ -190,6 +193,18 @@ func TestParseDomainFromWebsite(t *testing.T) {
 	}
 }
 
+func TestShouldTrackEmptyHost(t *testing.T) {
+	feeder := &UmamiFeeder{createNewWebsites: true}
+
+	for _, host := range []string{"", ":8080"} {
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+		req.Host = host
+		if _, _, ok := feeder.shouldTrack(req); ok {
+			t.Fatalf("expected Host %q to be ignored", host)
+		}
+	}
+}
+
 func TestVerifyConfigIgnoreIPs(t *testing.T) {
 	feeder := &UmamiFeeder{headerIp: "X-Real-IP"}
 	if err := feeder.verifyConfig(&Config{IgnoreIPs: []string{"::ffff:10.0.0.0/104", "::ffff:192.168.0.7"}}); err != nil {
@@ -265,6 +280,23 @@ func TestShouldTrackCustomExtensions(t *testing.T) {
 	assertResource(t, feeder, false, "http://localhost/index.html")
 }
 
+func TestServeHTTPEnabled(t *testing.T) {
+	feeder := &UmamiFeeder{
+		next:     http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) { _, _ = rw.Write([]byte("ok")) }),
+		queue:    make(chan *UmamiEvent, 1),
+		websites: map[string]string{"example.com": "id"},
+		headerIp: "X-Real-IP",
+	}
+	feeder.isEnabled.Store(true)
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://Example.com:8080/", nil)
+	feeder.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(feeder.queue) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(feeder.queue))
+	}
+}
+
 func TestNewNormalizesWebsites(t *testing.T) {
 	cfg := CreateConfig()
 	cfg.Enabled = false
@@ -275,7 +307,101 @@ func TestNewNormalizesWebsites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if websiteId := handler.(*UmamiFeeder).websites["example.com"]; websiteId != "id" {
+	if websiteId := lookupWebsiteId(handler.(*UmamiFeeder), "example.com"); websiteId != "id" {
 		t.Fatalf("expected normalized website, got %q", websiteId)
+	}
+}
+
+func TestResolveWebsiteIdRemembersFailure(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		rw.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	feeder := &UmamiFeeder{umamiHost: server.URL, websites: map[string]string{}, failedWebsites: map[string]time.Time{}}
+
+	for i := 0; i < 3; i++ {
+		if websiteId := resolveWebsiteId(context.Background(), feeder, "127.0.0.1"); websiteId != "" {
+			t.Fatalf("expected no websiteId, got %q", websiteId)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 API call, got %d", calls.Load())
+	}
+}
+
+func TestResolveWebsiteIdRejectsEmptyId(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		_, _ = rw.Write([]byte(`{"data":{"id":"x"}}`))
+	}))
+	defer server.Close()
+
+	feeder := &UmamiFeeder{umamiHost: server.URL, websites: map[string]string{}, failedWebsites: map[string]time.Time{}}
+
+	for i := 0; i < 3; i++ {
+		if websiteId := resolveWebsiteId(context.Background(), feeder, "example.com"); websiteId != "" {
+			t.Fatalf("expected no websiteId, got %q", websiteId)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 API call, got %d", calls.Load())
+	}
+}
+
+func TestResolveWebsiteIdCreatesOnce(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(rw).Encode(Website{ID: "new-id", Domain: "example.com"})
+	}))
+	defer server.Close()
+
+	feeder := &UmamiFeeder{umamiHost: server.URL, websites: map[string]string{}, failedWebsites: map[string]time.Time{}}
+
+	done := make(chan string, 4)
+	for i := 0; i < 4; i++ {
+		go func() { done <- resolveWebsiteId(context.Background(), feeder, "example.com") }()
+	}
+	for i := 0; i < 4; i++ {
+		if websiteId := <-done; websiteId != "new-id" {
+			t.Fatalf("expected new-id, got %q", websiteId)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected 1 API call, got %d", calls.Load())
+	}
+}
+
+func TestWorkerDisablesOnShutdown(t *testing.T) {
+	feeder := &UmamiFeeder{queue: make(chan *UmamiEvent, 1), batchMaxWait: time.Hour}
+	feeder.isEnabled.Store(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := feeder.umamiEventFeeder(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if feeder.isEnabled.Load() {
+		t.Fatal("expected plugin to be disabled after shutdown")
+	}
+}
+
+func TestResolverPanicReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		rw.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	// A nil failedWebsites map makes the failure bookkeeping panic.
+	feeder := &UmamiFeeder{umamiHost: server.URL, websites: map[string]string{}, unresolved: make(chan *UmamiEvent, 1)}
+	feeder.unresolved <- &UmamiEvent{Hostname: "example.com"}
+
+	if err := runRecovered(context.Background(), feeder.websiteResolver); err == nil {
+		t.Fatal("expected the recovered panic to be returned as an error")
 	}
 }

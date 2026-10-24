@@ -28,15 +28,8 @@ type SendBody struct {
 	Type    string      `json:"type"`
 }
 
-func (h *UmamiFeeder) submitToFeed(req *http.Request, statusCode int) {
-	hostname := parseDomainFromHost(req.Host)
-	websiteId := getWebsiteId(h, hostname)
-
-	if websiteId == "" {
-		h.error("tracking skipped, websiteId is unknown: " + hostname)
-		return
-	}
-
+// submitToFeed queues an event, sending it to the website resolver first if websiteId is empty.
+func (h *UmamiFeeder) submitToFeed(req *http.Request, hostname, websiteId string, statusCode int) {
 	event := &UmamiEvent{
 		Hostname:  hostname,
 		Language:  parseAcceptLanguage(req.Header.Get("Accept-Language")),
@@ -54,6 +47,67 @@ func (h *UmamiFeeder) submitToFeed(req *http.Request, statusCode int) {
 		}
 	}
 
+	queue := h.queue
+	if websiteId == "" {
+		queue = h.unresolved
+	}
+	select {
+	case queue <- event:
+	default:
+		h.error("failed to submit event: queue full")
+	}
+}
+
+// supervise runs fn, restarting it after an error or panic.
+func (h *UmamiFeeder) supervise(ctx context.Context, name string, fn func(ctx context.Context) error) {
+	for {
+		err := runRecovered(ctx, fn)
+		if err == nil {
+			return
+		}
+
+		h.error(name + " failed: " + err.Error())
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second): // Avoid a hot loop on repeated failures.
+		}
+	}
+}
+
+// runRecovered runs fn, returning a panic as an error.
+func runRecovered(ctx context.Context, fn func(ctx context.Context) error) (err error) {
+	defer func() {
+		if panicVal := recover(); panicVal != nil {
+			err = fmt.Errorf("panic: %v", panicVal)
+		}
+	}()
+
+	return fn(ctx)
+}
+
+// websiteResolver sets websiteIds of queued events and passes them to the worker.
+// It runs separately, so slow API calls don't stall the worker.
+func (h *UmamiFeeder) websiteResolver(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case event := <-h.unresolved:
+			h.resolveEvent(ctx, event)
+		}
+	}
+}
+
+// resolveEvent sets the event's websiteId and passes it to the worker, or drops it if unresolved.
+func (h *UmamiFeeder) resolveEvent(ctx context.Context, event *UmamiEvent) {
+	event.Website = resolveWebsiteId(ctx, h, event.Hostname)
+	if event.Website == "" {
+		h.debugf("tracking skipped, websiteId is unknown: %s", event.Hostname)
+		return
+	}
+
 	select {
 	case h.queue <- event:
 	default:
@@ -61,26 +115,7 @@ func (h *UmamiFeeder) submitToFeed(req *http.Request, statusCode int) {
 	}
 }
 
-func (h *UmamiFeeder) startWorker(ctx context.Context) {
-	for {
-		err := h.umamiEventFeeder(ctx)
-		if err != nil {
-			h.error("worker failed: " + err.Error())
-		} else {
-			return
-		}
-	}
-}
-
 func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) error {
-	defer func() {
-		// Recover from panic.
-		panicVal := recover()
-		if panicVal != nil {
-			h.error("panic: " + fmt.Sprint(panicVal))
-		}
-	}()
-
 	batch := make([]*SendBody, 0, h.batchSize)
 	timeout := time.NewTimer(h.batchMaxWait)
 
@@ -89,8 +124,14 @@ func (h *UmamiFeeder) umamiEventFeeder(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			h.debugf("worker shutting down (canceled)")
+			// Stop accepting events, nobody reads them anymore.
+			h.isEnabled.Store(false)
+			// Best effort, queued events are dropped.
 			if len(batch) > 0 {
-				h.reportEventsToUmami(ctx, batch)
+				// The worker ctx is canceled, so use a fresh one.
+				sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				h.reportEventsToUmami(sendCtx, batch)
+				cancel()
 			}
 			return nil
 

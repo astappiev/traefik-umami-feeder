@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,9 +106,10 @@ type UmamiFeeder struct {
 	next       http.Handler
 	name       string
 	isDebug    bool
-	isEnabled  bool
+	isEnabled  atomic.Bool
 	logHandler *log.Logger
 	queue      chan *UmamiEvent
+	unresolved chan *UmamiEvent // events of unknown websites, nil unless createNewWebsites
 
 	batchSize    int
 	batchMaxWait time.Duration
@@ -118,6 +120,8 @@ type UmamiFeeder struct {
 	websites          map[string]string
 	websitesMutex     sync.RWMutex
 	createNewWebsites bool
+	createMutex       sync.Mutex           // serializes website creation
+	failedWebsites    map[string]time.Time // hostname to last failed creation, guarded by createMutex
 
 	trackErrors       bool
 	trackAllResources bool
@@ -136,7 +140,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		next:       next,
 		name:       name,
 		isDebug:    config.Debug,
-		isEnabled:  config.Enabled && !config.Disabled,
 		logHandler: log.New(os.Stdout, "", 0),
 
 		queue:        make(chan *UmamiEvent, config.QueueSize),
@@ -149,6 +152,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		websites:          make(map[string]string, len(config.Websites)),
 		websitesMutex:     sync.RWMutex{},
 		createNewWebsites: config.CreateNewWebsites,
+		failedWebsites:    map[string]time.Time{},
 
 		trackErrors:       config.TrackErrors,
 		trackAllResources: config.TrackAllResources,
@@ -166,8 +170,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		h.websites[parseDomainFromWebsite(domain)] = websiteId
 	}
 
-	if h.isEnabled {
-		h.isEnabled = false // Disable until connection and config verification is done.
+	if config.CreateNewWebsites {
+		h.unresolved = make(chan *UmamiEvent, config.QueueSize)
+	}
+
+	// Stays disabled until the connection and config are verified.
+	if config.Enabled && !config.Disabled {
 		go h.retryConnection(ctx, config)
 	}
 
@@ -175,11 +183,18 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 }
 
 func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if h.isEnabled && h.shouldTrack(req) {
+	if !h.isEnabled.Load() {
+		h.next.ServeHTTP(rw, req)
+		return
+	}
+
+	if hostname, websiteId, ok := h.shouldTrack(req); ok {
 		// If the resource should be reported, we wrap the response writer and check the status code before reporting
 		responseWrapper := &ResponseWrapper{
 			ResponseWriter: rw,
 			request:        req,
+			hostname:       hostname,
+			websiteId:      websiteId,
 			feeder:         h,
 		}
 
@@ -218,13 +233,15 @@ func (h *UmamiFeeder) retryConnection(ctx context.Context, config *Config) {
 				err = h.verifyConfig(config)
 				if err == nil {
 					h.debugf("Configuration verified. Enabling plugin and starting worker.")
-					h.isEnabled = true
-					go h.startWorker(ctx)
+					h.isEnabled.Store(true)
+					go h.supervise(ctx, "worker", h.umamiEventFeeder)
+					if h.unresolved != nil {
+						go h.supervise(ctx, "website resolver", h.websiteResolver)
+					}
 					return // Successfully connected and configured, exit retry goroutine
 				}
 
 				h.error("Configuration error, the plugin is disabled: " + err.Error())
-				h.isEnabled = false
 				return // Exit retry goroutine, plugin remains disabled.
 			}
 
@@ -387,30 +404,28 @@ func (h *UmamiFeeder) shouldTrackRequest(req *http.Request, hostname string) boo
 	return true
 }
 
-func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
-	hostname := parseDomainFromHost(req.Host)
-	if !h.shouldTrackRequest(req, hostname) {
-		return false
-	}
-
+// shouldTrack also returns the hostname and websiteId, reused when submitting the event.
+// websiteId is empty for an unknown website that will be created (createNewWebsites).
+func (h *UmamiFeeder) shouldTrack(req *http.Request) (string, string, bool) {
+	// Cheapest check first, it rejects most static assets.
 	if !h.shouldTrackResource(req.URL.Path) {
 		h.debugf("ignoring resource %s", req.URL.Path)
-		return false
+		return "", "", false
 	}
 
-	if h.createNewWebsites {
-		return true
+	hostname := parseDomainFromHost(req.Host)
+	if hostname == "" {
+		h.debugf("ignoring request without host")
+		return "", "", false
 	}
 
-	h.websitesMutex.RLock()
-	if _, ok := h.websites[hostname]; ok {
-		h.websitesMutex.RUnlock()
-		return true
+	websiteId := lookupWebsiteId(h, hostname)
+	if websiteId == "" && !h.createNewWebsites {
+		h.debugf("ignoring domain %s", hostname)
+		return "", "", false
 	}
-	h.websitesMutex.RUnlock()
 
-	h.debugf("ignoring domain %s", hostname)
-	return false
+	return hostname, websiteId, h.shouldTrackRequest(req, hostname)
 }
 
 func (h *UmamiFeeder) shouldTrackResource(url string) bool {
