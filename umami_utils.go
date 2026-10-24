@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
 func sendRequest(ctx context.Context, url string, body any, headers http.Header) (*http.Response, error) {
 	var req *http.Request
 	var err error
@@ -40,8 +42,7 @@ func sendRequest(ctx context.Context, url string, body any, headers http.Header)
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -102,11 +103,11 @@ const parseAcceptLanguagePattern = `([a-zA-Z\-]+)(?:;q=\d\.\d)?(?:,\s)?`
 var parseAcceptLanguageRegexp = regexp.MustCompile(parseAcceptLanguagePattern)
 
 func parseAcceptLanguage(acceptLanguage string) string {
-	matches := parseAcceptLanguageRegexp.FindAllStringSubmatch(acceptLanguage, -1)
-	if len(matches) == 0 {
+	match := parseAcceptLanguageRegexp.FindStringSubmatch(acceptLanguage)
+	if len(match) < 2 {
 		return ""
 	}
-	return matches[0][1]
+	return match[1]
 }
 
 func extractRemoteIP(req *http.Request) string {

@@ -190,8 +190,10 @@ func (h *UmamiFeeder) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	if hostname, websiteId, ok := h.shouldTrack(req); ok {
 		// If the resource should be reported, we wrap the response writer and check the status code before reporting
+		flusher, _ := rw.(http.Flusher)
 		responseWrapper := &ResponseWrapper{
 			ResponseWriter: rw,
+			flusher:        flusher,
 			request:        req,
 			hostname:       hostname,
 			websiteId:      websiteId,

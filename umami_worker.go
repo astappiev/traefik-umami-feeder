@@ -160,11 +160,15 @@ func (h *UmamiFeeder) reportEventsToUmami(ctx context.Context, events []*SendBod
 		h.error("failed to send tracking: " + err.Error())
 		return
 	}
-	if h.isDebug {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		h.debugf("%v: %s", resp.Status, string(bodyBytes))
-	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
+
+	if h.isDebug {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		h.debugf("%v: %s", resp.Status, string(bodyBytes))
+	} else {
+		// Drain the body so the connection can be reused.
+		_, _ = io.Copy(io.Discard, resp.Body)
+	}
 }

@@ -11,6 +11,7 @@ import (
 type ResponseWrapper struct {
 	http.ResponseWriter
 
+	flusher   http.Flusher // nil if rw can't flush, asserted once instead of per Write
 	request   *http.Request
 	hostname  string
 	websiteId string
@@ -25,6 +26,11 @@ func (rw *ResponseWrapper) WriteHeader(statusCode int) {
 		return // Prevent multiple calls
 	}
 
+	// 1xx responses (e.g. 103 Early Hints) aren't final and pass through untracked, except 101 Switching Protocols.
+	if statusCode >= 100 && statusCode < 200 && statusCode != http.StatusSwitchingProtocols {
+		rw.ResponseWriter.WriteHeader(statusCode)
+		return
+	}
 	rw.written = true
 
 	if rw.feeder.shouldTrackStatus(statusCode) {
@@ -37,13 +43,18 @@ func (rw *ResponseWrapper) WriteHeader(statusCode int) {
 
 // Write intercepts the write call to ensure Flush is called after writing.
 func (rw *ResponseWrapper) Write(b []byte) (int, error) {
-	rw.WriteHeader(http.StatusOK)
+	// Checked here to avoid a method call per Write, which is costly under Yaegi.
+	if !rw.written {
+		rw.WriteHeader(http.StatusOK)
+	}
 
 	n, err := rw.ResponseWriter.Write(b)
 
 	// Flush explicitly after write
 	// Required due to https://github.com/astappiev/traefik-umami-feeder/issues/7
-	rw.Flush()
+	if rw.flusher != nil {
+		rw.flusher.Flush()
+	}
 
 	return n, err
 }
@@ -59,7 +70,7 @@ func (rw *ResponseWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // Flush implements the http.Flusher interface.
 func (rw *ResponseWrapper) Flush() {
-	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
+	if rw.flusher != nil {
+		rw.flusher.Flush()
 	}
 }

@@ -280,6 +280,69 @@ func TestShouldTrackCustomExtensions(t *testing.T) {
 	assertResource(t, feeder, false, "http://localhost/index.html")
 }
 
+func TestParseAcceptLanguage(t *testing.T) {
+	for header, expected := range map[string]string{
+		"":                        "",
+		"en-US":                   "en-US",
+		"en-US,en;q=0.9,de;q=0.8": "en-US",
+		"de;q=0.9, en":            "de",
+	} {
+		if actual := parseAcceptLanguage(header); actual != expected {
+			t.Fatalf("expected %q for %q, got %q", expected, header, actual)
+		}
+	}
+}
+
+func TestResponseWrapperSubmitsOnce(t *testing.T) {
+	feeder := &UmamiFeeder{queue: make(chan *UmamiEvent, 2)}
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/", nil)
+	recorder := httptest.NewRecorder()
+	rw := &ResponseWrapper{ResponseWriter: recorder, flusher: recorder, request: req, hostname: "example.com", websiteId: "id", feeder: feeder}
+
+	_, _ = rw.Write([]byte("hello"))
+	_, _ = rw.Write([]byte(" world"))
+
+	if len(feeder.queue) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(feeder.queue))
+	}
+	if event := <-feeder.queue; event.Hostname != "example.com" || event.Website != "id" {
+		t.Fatalf("unexpected event %+v", event)
+	}
+	if !recorder.Flushed || recorder.Body.String() != "hello world" {
+		t.Fatalf("expected flushed body, got flushed=%v body=%q", recorder.Flushed, recorder.Body.String())
+	}
+}
+
+// statusRecorder records every status code, httptest.ResponseRecorder keeps only the first one.
+type statusRecorder struct {
+	http.ResponseWriter
+	codes []int
+}
+
+func (r *statusRecorder) WriteHeader(statusCode int) {
+	r.codes = append(r.codes, statusCode)
+}
+
+func TestResponseWrapperPassesInformational(t *testing.T) {
+	feeder := &UmamiFeeder{queue: make(chan *UmamiEvent, 2), trackErrors: true}
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/", nil)
+	recorder := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+	rw := &ResponseWrapper{ResponseWriter: recorder, request: req, hostname: "example.com", websiteId: "id", feeder: feeder}
+
+	rw.WriteHeader(http.StatusEarlyHints)
+	rw.WriteHeader(http.StatusNotFound)
+
+	if len(recorder.codes) != 2 || recorder.codes[1] != http.StatusNotFound {
+		t.Fatalf("expected 103 then 404, got %v", recorder.codes)
+	}
+	if len(feeder.queue) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(feeder.queue))
+	}
+	if event := <-feeder.queue; event.Data["status_code"] != http.StatusNotFound {
+		t.Fatalf("expected event for 404, got %+v", event.Data)
+	}
+}
+
 func TestServeHTTPEnabled(t *testing.T) {
 	feeder := &UmamiFeeder{
 		next:     http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) { _, _ = rw.Write([]byte("ok")) }),
