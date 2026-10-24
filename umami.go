@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
 	"path"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -121,9 +121,9 @@ type UmamiFeeder struct {
 
 	trackErrors       bool
 	trackAllResources bool
-	trackExtensions   []string
+	trackExtensions   map[string]struct{} // nil means contentExtensions
 
-	ignoreHosts      []string
+	ignoreHosts      map[string]struct{}
 	ignoreUserAgents []string
 	ignoreRegexps    []regexp.Regexp
 	ignorePrefixes   []netip.Prefix
@@ -146,19 +146,24 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		umamiHost:         config.UmamiHost,
 		umamiToken:        config.UmamiToken,
 		umamiTeamId:       config.UmamiTeamId,
-		websites:          config.Websites,
+		websites:          make(map[string]string, len(config.Websites)),
 		websitesMutex:     sync.RWMutex{},
 		createNewWebsites: config.CreateNewWebsites,
 
 		trackErrors:       config.TrackErrors,
 		trackAllResources: config.TrackAllResources,
-		trackExtensions:   config.TrackExtensions,
+		trackExtensions:   extensionSet(config.TrackExtensions),
 
-		ignoreHosts:      config.IgnoreHosts,
+		ignoreHosts:      hostSet(config.IgnoreHosts),
 		ignoreUserAgents: config.IgnoreUserAgents,
 		ignoreRegexps:    []regexp.Regexp{},
 		ignorePrefixes:   []netip.Prefix{},
 		headerIp:         config.HeaderIp,
+	}
+
+	// Normalize keys the same way as request hosts.
+	for domain, websiteId := range config.Websites {
+		h.websites[parseDomainFromWebsite(domain)] = websiteId
 	}
 
 	if h.isEnabled {
@@ -262,8 +267,9 @@ func (h *UmamiFeeder) connect(ctx context.Context, config *Config) error {
 
 		h.websitesMutex.Lock()
 		for _, website := range *websites {
-			if _, ok := h.websites[website.Domain]; !ok {
-				h.websites[website.Domain] = website.ID
+			domain := parseDomainFromWebsite(website.Domain)
+			if _, ok := h.websites[domain]; !ok {
+				h.websites[domain] = website.ID
 			}
 		}
 		h.websitesMutex.Unlock()
@@ -278,7 +284,17 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 		for _, ignoreIP := range config.IgnoreIPs {
 			network, err := netip.ParsePrefix(ignoreIP)
 			if err != nil {
-				network, err = netip.ParsePrefix(ignoreIP + "/32")
+				// A single address, use a full-length prefix (/32 or /128).
+				// ParseAddr rejects an "ip:port" typo like "192.168.1.0:24".
+				var addr netip.Addr
+				addr, err = netip.ParseAddr(ignoreIP)
+				if err == nil {
+					addr = addr.Unmap()
+					network = netip.PrefixFrom(addr, addr.BitLen())
+				}
+			} else if network.Addr().Is4In6() && network.Bits() >= 96 {
+				// Request IPs are unmapped, so mapped prefixes (e.g. "::ffff:10.0.0.0/104") must be too.
+				network = netip.PrefixFrom(network.Addr().Unmap(), network.Bits()-96)
 			}
 
 			if err != nil || !network.IsValid() {
@@ -303,10 +319,17 @@ func (h *UmamiFeeder) verifyConfig(config *Config) error {
 	return nil
 }
 
-func (h *UmamiFeeder) shouldTrackRequest(req *http.Request) bool {
+// shouldTrackRequest applies the ignore rules, hostname is the normalized req.Host.
+func (h *UmamiFeeder) shouldTrackRequest(req *http.Request, hostname string) bool {
 	if len(h.ignoreHosts) > 0 {
-		for _, disabledHost := range h.ignoreHosts {
-			if strings.EqualFold(req.Host, disabledHost) {
+		// Entries without a port match any port.
+		if _, ok := h.ignoreHosts[hostname]; ok {
+			h.debugf("ignoring host %s", hostname)
+			return false
+		}
+		// Entries with a port match only that port, keyed like normalizeHostPort.
+		if i := strings.LastIndexByte(req.Host, ':'); i >= 0 {
+			if _, ok := h.ignoreHosts[net.JoinHostPort(hostname, req.Host[i+1:])]; ok {
 				h.debugf("ignoring host %s", req.Host)
 				return false
 			}
@@ -319,12 +342,20 @@ func (h *UmamiFeeder) shouldTrackRequest(req *http.Request) bool {
 			requestIp = req.RemoteAddr
 		}
 
+		// Inlined, as each call allocates under Yaegi. Bare IPs (e.g. X-Real-IP) are most common, so try them first.
 		ip, err := netip.ParseAddr(requestIp)
+		if err != nil {
+			var addrPort netip.AddrPort
+			addrPort, err = netip.ParseAddrPort(requestIp)
+			ip = addrPort.Addr()
+		}
 		if err != nil {
 			h.debugf("invalid IP %s", requestIp)
 			return false
 		}
 
+		// Unmap "::ffff:10.0.0.5" so it matches IPv4 prefixes.
+		ip = ip.Unmap()
 		for _, prefix := range h.ignorePrefixes {
 			if prefix.Contains(ip) {
 				h.debugf("ignoring IP %s", ip)
@@ -357,7 +388,8 @@ func (h *UmamiFeeder) shouldTrackRequest(req *http.Request) bool {
 }
 
 func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
-	if !h.shouldTrackRequest(req) {
+	hostname := parseDomainFromHost(req.Host)
+	if !h.shouldTrackRequest(req, hostname) {
 		return false
 	}
 
@@ -370,7 +402,6 @@ func (h *UmamiFeeder) shouldTrack(req *http.Request) bool {
 		return true
 	}
 
-	hostname := parseDomainFromHost(req.Host)
 	h.websitesMutex.RLock()
 	if _, ok := h.websites[hostname]; ok {
 		h.websitesMutex.RUnlock()
@@ -387,21 +418,18 @@ func (h *UmamiFeeder) shouldTrackResource(url string) bool {
 		return true
 	}
 
-	pathExt := path.Ext(url)
-
-	// If a custom file extension list is defined, check if the resource matches it. If not, do not report.
-	if len(h.trackExtensions) > 0 {
-		return slices.Contains(h.trackExtensions, pathExt)
+	// A map lookup, as each interpreted comparison is costly under Yaegi.
+	extensions := h.trackExtensions
+	if extensions == nil {
+		extensions = contentExtensions
 	}
 
-	// Check if the suffix is regarded to be "content".
-	switch pathExt {
-	case "", ".htm", ".html", ".xhtml", ".jsf", ".md", ".php", ".rss", ".rtf", ".txt", ".xml", ".pdf":
-		return true
-	}
-
-	return false
+	_, ok := extensions[strings.ToLower(path.Ext(url))]
+	return ok
 }
+
+// contentExtensions are tracked by default.
+var contentExtensions = extensionSet([]string{"", ".htm", ".html", ".xhtml", ".jsf", ".md", ".php", ".rss", ".rtf", ".txt", ".xml", ".pdf"})
 
 func (h *UmamiFeeder) shouldTrackStatus(statusCode int) bool {
 	if statusCode >= 400 {

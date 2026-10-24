@@ -85,9 +85,13 @@ func sendRequestAndParse(ctx context.Context, url string, body any, headers http
 }
 
 func parseDomainFromHost(host string) string {
-	// check if the host has a port
-	if strings.Contains(host, ":") {
-		host = strings.Split(host, ":")[0]
+	// strip the port, also of IPv6 like "[::1]:80", IndexByte avoids an error allocation
+	if strings.IndexByte(host, ':') >= 0 {
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		} else {
+			host = strings.Trim(host, "[]")
+		}
 	}
 	host = strings.TrimSuffix(host, ".")
 	return strings.ToLower(host)
@@ -136,4 +140,46 @@ func extractRemoteIP(req *http.Request) string {
 	}
 
 	return ""
+}
+
+// hostSet builds a set of normalized hosts, or nil if empty. Hosts with a port only match that port.
+func hostSet(hosts []string) map[string]struct{} {
+	return stringSet(hosts, normalizeHostPort)
+}
+
+// normalizeHostPort normalizes the hostname, keeping the port if present.
+func normalizeHostPort(host string) string {
+	if hostname, port, err := net.SplitHostPort(host); err == nil {
+		return net.JoinHostPort(parseDomainFromHost(hostname), port)
+	}
+	return parseDomainFromHost(host)
+}
+
+// parseDomainFromWebsite normalizes a website domain, stripping a scheme or path
+// (e.g. "https://example.com/"), as Umami doesn't validate it.
+func parseDomainFromWebsite(domain string) string {
+	if _, rest, found := strings.Cut(domain, "://"); found {
+		domain = rest
+	}
+	if i := strings.IndexByte(domain, '/'); i >= 0 {
+		domain = domain[:i]
+	}
+	return parseDomainFromHost(domain)
+}
+
+// extensionSet builds a lowercase set of extensions, or nil if empty.
+func extensionSet(extensions []string) map[string]struct{} {
+	return stringSet(extensions, strings.ToLower)
+}
+
+func stringSet(items []string, normalize func(string) string) map[string]struct{} {
+	if len(items) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		set[normalize(item)] = struct{}{}
+	}
+	return set
 }
